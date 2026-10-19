@@ -20,6 +20,11 @@ var published := false
 var transport_established := false
 var failures := 0
 var listed_rooms := ""
+var retry_button: Button
+var retry_supported := false
+var retry_requested := false
+var setup_failed := false
+var epoch := 0
 
 func setup(owner_game, canvas):
  game = owner_game
@@ -50,6 +55,16 @@ func setup(owner_game, canvas):
  refresh_button.custom_minimum_size.y = 36
  refresh_button.pressed.connect(refresh)
  panel.add_child(refresh_button)
+ retry_button = Button.new()
+ retry_button.text = "Retry with Compatibility (TLS 443)"
+ retry_button.custom_minimum_size.y = 36
+ retry_button.hide()
+ retry_button.pressed.connect(func():
+  retry_requested = true
+  retry_button.disabled = true
+  hint.text = "Requesting compatibility retry for both players…"
+  next_poll = 0)
+ panel.add_child(retry_button)
  rows = VBoxContainer.new()
  panel.add_child(rows)
  var back = Button.new()
@@ -201,6 +216,45 @@ func enter_room(action: String, id: String = ""):
  busy = false
  next_poll = 0
 
+func offer_compatibility_retry(message: String, source: String) -> bool:
+ if not active or room_id.is_empty() or transport_established or epoch != 0 or game.rtc_route_mode == 3 or not retry_supported:
+  return false
+ if source not in ["rtc_terminal","connect_timeout","gather_timeout","no_candidates","multiplayer_connect_failed"]:
+  return false
+ game.reset_network()
+ game.mode = "solo"
+ game.core.configure(1)
+ game.sync_core_view()
+ setup_failed = true
+ game.setup_menu.hide()
+ game.signal_panel.hide()
+ panel.show()
+ hint.text = message + "\nRetry switches both players to Compatibility (TLS 443)."
+ retry_button.show()
+ retry_button.disabled = false
+ return true
+
+func restart_compatibility(attempt: int):
+ epoch = 1
+ setup_failed = false
+ retry_requested = false
+ retry_button.hide()
+ accepted = false
+ published = false
+ transport_established = false
+ game.reset_network()
+ game.mode = "solo"
+ game.core.configure(1)
+ game.sync_core_view()
+ game.connection_route.select(3)
+ game.pairing_role = role
+ hint.text = "Retrying both players with Compatibility (TLS 443)…"
+ busy = true
+ if role == "host": await game.rtc_offer()
+ if attempt != generation: return
+ busy = false
+ next_poll = 0
+
 func remember_connection():
  # Room readiness is sticky on the server; retain it here as well. A brief
  # ICE interruption must not make an established game depend on setup again.
@@ -219,7 +273,7 @@ func sync_room():
  var attempt = generation
  remember_connection()
  var signal_code = game.signal_out.text if game.signal_finished and not published else ""
- var result = await request_data({"action":"sync","id":room_id,"seat":seat,"signal":signal_code,"ready":transport_established},attempt)
+ var result = await request_data({"action":"sync","id":room_id,"seat":seat,"signal":signal_code,"ready":transport_established,"epoch":epoch,"retryTls":retry_requested},attempt)
  if attempt != generation: return
  # ICE can connect while HTTP is in flight, then temporarily disconnect.
  # Keep established sessions under the transport's own liveness deadlines.
@@ -239,6 +293,11 @@ func sync_room():
   if failures >= 3: game.rtc_fail("Room setup failed: " + str(result.error) + " · open Private rooms and retry","lobby_errors")
   return
  failures = 0
+ retry_supported = result.get("retrySupported",false) == true
+ if result.get("epoch",0) == 1 and epoch == 0:
+  await restart_compatibility(attempt)
+  return
+ if setup_failed: return
  if not signal_code.is_empty(): published = true
  if transport_established:
   panel.hide()
@@ -265,6 +324,11 @@ func close():
  var old_room = room_id
  var old_seat = seat
  generation += 1
+ epoch = 0
+ retry_supported = false
+ retry_requested = false
+ setup_failed = false
+ retry_button.hide()
  active = false
  busy = false
  room_id = ""

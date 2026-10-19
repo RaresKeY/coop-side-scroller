@@ -157,3 +157,24 @@ Deno.test('Continuous public diagnostic uploads do not retain an abandoned room'
   check(alarms===1,'room expiry postponed or journal unnecessarily wakes every lease');
  } finally {Date.now=original;}
 });
+
+Deno.test('Compatibility retry is seat-authorized, idempotent and fences stale signals/readiness',async()=>{
+ const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Retry'}))[1];
+ await f.call({action:'join',id:room.id,seat:guest});
+ const sync=(seat,extra={})=>f.call({action:'sync',id:room.id,seat,...extra});
+ await sync(host,{signal:signal('offer'),ready:true});
+ await sync(guest,{signal:signal('answer')});
+ check((await sync(third,{retryTls:true}))[0]===403);
+ check((await sync(host,{retryTls:'yes'}))[0]===400);
+ check((await sync(host,{epoch:-1}))[0]===400);
+ const retried=(await sync(guest,{retryTls:true,epoch:0}))[1];
+ check(retried.epoch===1&&retried.signal===''&&!retried.complete&&retried.retrySupported);
+ // An old request cannot restore the prior offer or mark the new attempt ready.
+ check((await sync(host,{signal:signal('offer'),ready:true}))[1].signal==='');
+ const fresh=signal('offer','b'.repeat(32));
+ check((await sync(host,{epoch:1,signal:fresh}))[0]===200);
+ check((await sync(guest,{retryTls:true,epoch:0}))[1].epoch===1);
+ check((await sync(guest,{epoch:1}))[1].signal===fresh,'duplicate retry cleared fresh offer');
+ check((await sync(guest,{epoch:1,signal:signal('answer','b'.repeat(32)),ready:true}))[1].complete===false,'stale readiness survived reset');
+ check((await sync(host,{epoch:1,ready:true}))[1].complete===true);
+});

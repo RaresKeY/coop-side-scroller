@@ -250,6 +250,17 @@ export class PrivateLobbies {
   const host=data.seat===room.host;
   if(!host && data.seat!==room.guest)return reply(403,'seat_denied');
   if(data.action==='leave') {await this.cleanupEvent(data.id,host?'host_leave':'guest_leave');delete rooms[data.id];await save();return Response.json({version:1,closed:true});}
+  if(data.retryTls!==undefined && typeof data.retryTls!=='boolean')return reply(400,'invalid_request');
+  if(data.epoch!==undefined && (!Number.isInteger(data.epoch)||data.epoch<0||data.epoch>1))return reply(400,'invalid_request');
+  // One idempotent compatibility retry per room, authorized by seat membership.
+  // Epoch fencing prevents in-flight UDP signals/readiness contaminating TLS.
+  if(data.retryTls && !room.epoch) {
+   room.epoch=1;room.offer='';room.answer='';room.hostReady=false;room.guestReady=false;
+  }
+  room[host?'hostSeen':'guestSeen']=now;
+  if((data.epoch??0)!==(room.epoch??0)) {
+   await save();return Response.json({version:1,id:data.id,players:room.guest?2:1,epoch:room.epoch??0,retrySupported:true,signal:'',complete:false});
+  }
   if(data.ready!==undefined && typeof data.ready!=='boolean')return reply(400,'invalid_ready');
   if(data.signal!==undefined && data.signal!=='') {
    const envelope=signalEnvelope(data.signal,host?'host':'client');
@@ -261,7 +272,7 @@ export class PrivateLobbies {
   }
   room[host?'hostSeen':'guestSeen']=now;
   if(data.ready)room[host?'hostReady':'guestReady']=true;
-  const result={version:1,id:data.id,players:room.guest?2:1,signal:host?room.answer:room.offer,complete:room.hostReady&&room.guestReady};
+  const result={version:1,id:data.id,epoch:room.epoch??0,retrySupported:true,players:room.guest?2:1,signal:host?room.answer:room.offer,complete:room.hostReady&&room.guestReady};
   // Signaling ends once both browsers are connected. Gameplay keeps running.
   if(result.complete){await this.cleanupEvent(data.id,'connected');delete rooms[data.id];}
   await save();return Response.json(result);

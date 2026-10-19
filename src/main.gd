@@ -299,6 +299,9 @@ func network_ended(message: String, source := "multiplayer_disconnect"):
   detail.reason = "connection"
   diagnostics.record("failure",detail)
   diagnostics.flush()
+ if OS.has_feature("web") and lobby != null and lobby.offer_compatibility_retry(message,source):
+  status.text = message
+  return
  solo()
  status.text = message + (" · diagnostic " + diagnostics.id if diagnostics != null and not diagnostics.id.is_empty() else "")
 
@@ -312,6 +315,9 @@ func rtc_fail(message: String, source := "setup"):
   diagnostics.record("failure",detail)
   diagnostics.flush()
   message += " · diagnostic " + diagnostics.id
+ if OS.has_feature("web") and lobby != null and lobby.offer_compatibility_retry(message,source):
+  status.text = message
+  return
  var in_lobby = lobby != null and not lobby.room_id.is_empty()
  var role = "" if in_lobby else pairing_role
  if in_lobby:
@@ -545,7 +551,7 @@ func rtc_update(now: int):
    if rtc.get_gathering_state() == WebRTCPeerConnection.GATHERING_STATE_COMPLETE and local_signal.sdp != "":
     signal_finished = true
     if local_signal.ice.is_empty():
-     rtc_fail("No connection candidates • check browser/network and connection mode")
+     rtc_fail("No connection candidates • check browser/network and connection mode","no_candidates")
      return
     var code = ConnectionCodes.encode(local_signal)
     if code.length() > ConnectionCodes.MAX_CODE:

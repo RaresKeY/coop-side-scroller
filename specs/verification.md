@@ -137,3 +137,9 @@ Publication secret audit passed. Deployment receipts, manifest, hashes, browser 
 ## Public-source sanitation — 2026-10-19
 
 Personal incident correlations and operational resource IDs were removed from current public documentation while retaining technical findings and evidence limits. The room-storage comment now acknowledges transient SDP/ICE addresses. Publication uses an explicit filename inventory and requires the offline secret audit before pushing Pages. Eleven offline publication tests pass, including stray-file rejection and audit-failure blocking. The known-value audit passed for local Git objects and source candidates; no Web candidate was present. This cleanup does not erase earlier commits or redeploy the game or Worker.
+
+## Coordinated compatibility retry
+
+Local validation on 2026-10-19: `deno test --no-config server/turn/worker.test.mjs server/turn/lobby.test.mjs` passed all 18 tests, including seat authorization, stale-epoch signal/readiness fencing, duplicate retry preservation of fresh offers and completion after retry. `./tests/connections.sh` passed the Godot setup suite, including retry availability, request fields, client reset, partner switching and leave cleanup. Core/bridge outputs were explicitly prepared with `python3 tools/build_core.py`.
+
+This is offline service and adapter lifecycle evidence. The updated Worker and client need publication together for hosted availability; live two-browser retry and restrictive-router acceptance are not established by these checks.
