@@ -10,3 +10,9 @@ __pycache__/
 !.env.example
 *.pem
 *.key
+
+.firebase/
+
+firebase-debug.log
+
+firebase-debug.*.log

@@ -133,6 +133,7 @@ def run(lobby=False, url=None):
   finally:
    for i,(_,page) in enumerate(locals().get('pages',[])):
     try:
+     print('SAFE ROUTE STATS',i,page.evaluate("(async()=>{const p=testPeers.at(-1);if(!p)return [];const stats=await p.getStats();return [...stats.values()].filter(s=>['transport','candidate-pair','local-candidate','remote-candidate'].includes(s.type)).map(s=>({type:s.type,candidateType:s.candidateType,state:s.state,nominated:s.nominated,bytesReceived:s.bytesReceived,selected:!!s.selectedCandidatePairId}));})()"))
      print('RELAY DIAGNOSTIC',i,page.evaluate('({core:globalThis.EmberCoreWeb?.diagnostics(),http:globalThis.testHttp,peers:globalThis.testPeers?.map(p=>({gathering:p.iceGatheringState,state:p.connectionState,policy:p.getConfiguration().iceTransportPolicy,candidates:(p.localDescription?.sdp.match(/a=candidate:/g)||[]).length}))})'))
      page.capture(ROOT/f'build/relay-setup-{i}.png')
     except Exception:pass

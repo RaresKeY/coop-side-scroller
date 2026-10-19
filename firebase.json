@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "ember-bridge-playtest",
+    "public": "build/web",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {"source": "**", "headers": [{"key": "Cache-Control", "value": "no-cache"}]},
+      {"source": "**/*.wasm", "headers": [{"key": "Content-Type", "value": "application/wasm"}]}
+    ]
+  }
+}

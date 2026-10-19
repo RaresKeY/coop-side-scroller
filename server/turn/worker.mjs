@@ -1,5 +1,5 @@
 // No packages. Account credentials never enter this Worker; only a scoped TURN key.
-const ORIGINS = new Set(['https://rareskey.github.io','http://127.0.0.1:27841']);
+const ORIGINS = new Set(['https://rareskey.github.io','http://127.0.0.1:27841','https://ember-bridge-playtest.web.app','https://ember-bridge-playtest.firebaseapp.com']);
 export const TTL = 3600;
 const URL_PATTERN = /^(stun|turn|turns):(?:stun|turn)\.cloudflare\.com:(?:3478|5349|443|80)(?:\?transport=(?:udp|tcp))?$/;
 const encoder = new TextEncoder();
