@@ -1,0 +1,15 @@
+# Live network lab
+
+Owners: `play-labs.sh`, `labs/main.gd`, `labs/main.tscn`, `src/lab_keys.gd`, and lab hooks in `src/main.gd`.
+
+No-argument `./play-labs.sh` opens a compact windowed native Godot grid. Network routes are Local pair / Host only / Join only; `./play-labs.sh pair` directly opens the local pair. Unknown routes reject before starting a runtime. The chooser has 12-pixel margins, 64-pixel caption and at least 104×32 native buttons, tooltips and initial keyboard focus. No browser-backed entries exist. It loads no game scene until a route is chosen.
+
+The controller creates and owns separate Godot worker PIDs inside the managed runtime. Each has its own scene tree, MultiplayerAPI, player dictionary, render window and game input. Host simulates; guest submits inputs and receives snapshots over actual ENet UDP. Controller never transfers authoritative world state. Local pair uses loopback and an ephemeral game port; remote modes use address/port from the chooser. Root `play.sh` remains the ordinary game entry.
+
+A separate loopback UDP control bus forwards **keyboard input only**, delay settings, finite test capture/quit requests and telemetry. A focused worker or the focused controller samples physical keys and submits them to the controller. Controller splits P1 A/D/W/F and P2 Left/Right/Up/L and dispatches one scheme to each worker. Stale focus/control input neutralizes in 200–250 ms. World-state separation is unaffected by this input routing; the guest's gameplay input still travels through ENet to the host. Per-worker telemetry includes PID, role, actual mode, actor count, RTT, snapshot age/sequence/gaps, and TX/RX RPC counts.
+
+Delay selection 0/50/100/200 ms applies to each process's outgoing input, snapshot and ping/pong RPCs. It is an application queue, not OS traffic shaping. RTT includes both directions and application/frame scheduling; it is not a one-way latency measurement. Sequence gaps represent missed snapshots, not all network packets. There is no interpolation, prediction, loss/jitter simulator or bandwidth estimator.
+
+Back to labs sends graceful quit, waits 700 ms, then terminates surviving exact owned PIDs. Closing either worker stops the other and returns to the chooser. Closing the controller terminates its owned workers. No detached lab process is intended to survive controller exit. Runs share the owning wrapper/container lock; workers launch inside it and do not reacquire that lock.
+
+`tests/lab.sh` runs offscreen under Gamescope and managed Godot, injects both control schemes after both actors connect, sets 50 ms each-way delay, checks independent movement, replicated combat, measured RTT and packet reception, captures each actual worker viewport, and exits with a finite deadline. This proves loopback/native behavior; it does not prove browser P2P or NAT traversal. Freshness uses the current source/imported tree; heavy import/export is explicit, no retained idle runtime or second prepared build tree exists.

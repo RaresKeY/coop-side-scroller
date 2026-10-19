@@ -3,6 +3,8 @@
   "license": "https://craftpix.net/file-licenses/",
   "character_product": "https://craftpix.net/product/prototype-saber-fighter-pixel-sprite-sheet/",
   "character_archive_sha256": "916dd70f68500c04380356dfcce61ada8a81e334d626960f96b2b83221d4889d",
+  "tiles_archive_sha256": "60f4a1a0a2af9755c5f2fb809815fcdd26bca67ce02857566d8761a15650aa07",
+  "tiles_product": "https://craftpix.net/freebies/free-prototype-2d-platformer-32x32-pixel-tileset/",
   "ui_archive_sha256": "8b670da644f1aa056e7e374e876eb100b7b284a2d3bdcbb129f43fe16dcefe71",
   "operations": "Unchanged PNG copies; runtime AtlasTexture regions; no exported artwork tools.",
   "files": [
@@ -55,6 +57,16 @@
       "source": "packs/rpg-game-ui/source/Sliced Images/Part_1/Top Game Bar/tgb_menu_button-PUSHED.png",
       "target": "assets/private/ui/button-PUSHED.png",
       "sha256": "7e3184cdeaaacd24932fdddef798f58b55e183c0a799ff01f8e70f4b04619e63"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-141897-free-prototype-2d-platformer-32x32-pixel-tileset/1 Tiles/Tile_02.png",
+      "target": "assets/private/tiles/Tile_02.png",
+      "sha256": "b9a66380a12e8184069ed1ebc5427fd52e4d1e710aebf53980534c5abe2880e3"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-141897-free-prototype-2d-platformer-32x32-pixel-tileset/Licens.txt",
+      "target": "assets/private/tiles/Licens.txt",
+      "sha256": "0c0f673571adbb935c734ac17fbc6e51fb4368a225b915aa25031712b03960d4"
     },
     {
       "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Licens.txt",
