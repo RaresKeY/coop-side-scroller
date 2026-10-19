@@ -2,7 +2,8 @@
 // Core readiness is awaited before starting Godot; failures reach its loading notice.
 (() => {
   // Bounded ICE metadata for successful and failed attempts. No addresses/SDP/URLs.
-  let diagnosticPeer = null, diagnosticEvents = [];
+  let diagnosticPeer = null, diagnosticEvents = [], previousTraffic = null, previousTransport = null;
+  let nextSample = 0, completedSample = 0;
   const bounded = n => Number.isFinite(n) ? Math.min(2147483647, Math.max(0, Math.round(n))) : 0;
   const candidateType = value => ['host','srflx','prflx','relay'].includes(value) ? value : 'unknown';
   const protocol = value => ['udp','tcp'].includes(value) ? value : 'unknown';
@@ -20,6 +21,8 @@
       super(...args);
       diagnosticPeer = this;
       diagnosticEvents = [];
+      previousTraffic = null;
+      previousTransport = null;
       enqueue(this,stateEvent(this));
       const candidates={host:0,srflx:0,prflx:0,relay:0};
       this.addEventListener('icecandidate',event=>{
@@ -38,14 +41,24 @@
     }
   };
   globalThis.EmberConnectionDiagnostics = Object.freeze({
-    reset: () => { diagnosticPeer = null; diagnosticEvents = []; },
+    context: () => {
+      const b=globalThis.EmberBuildInfo||{},host=globalThis.location?.hostname||'';
+      return JSON.stringify({commit:typeof b.commit==='string' && /^[a-f0-9]{40}$/.test(b.commit)?b.commit:'unknown',
+        payload:typeof b.payload==='string' && /^[a-f0-9]{64}$/.test(b.payload)?b.payload:'unknown',dirty:b.dirty===true,
+        built:typeof b.built==='string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(b.built)?b.built:'unknown',
+        site:['ember-bridge-playtest.web.app','ember-bridge-playtest.firebaseapp.com'].includes(host)?'firebase':host==='rareskey.github.io'?'pages':['localhost','127.0.0.1'].includes(host)?'local':'other',
+        test:['runpod','browser'].includes(globalThis.EmberDiagnosticTest)?globalThis.EmberDiagnosticTest:'none'});
+    },
+    reset: () => { diagnosticPeer = null; diagnosticEvents = []; previousTraffic = null; previousTransport = null; },
     drain: () => { const events=diagnosticEvents;diagnosticEvents=[];return JSON.stringify(events); },
     sample: async finish => {
-      const peer=diagnosticPeer;
-      if (!peer) return;
+      const peer=diagnosticPeer, sequence=++nextSample;
+      let result=null;
+      if (!peer) { finish("null"); return; }
       try {
         const stats=await peer.getStats();
-        if (peer!==diagnosticPeer) return;
+        if (peer!==diagnosticPeer || sequence<completedSample) return;
+        completedSample=sequence;
         const summary={event:'ice_stats',host:0,srflx:0,prflx:0,relay:0,pairs:0,failed:0,checking:0,succeeded:0,requests:0,responses:0};
         for (const stat of stats.values()) {
           if (stat.type==='local-candidate' && candidateType(stat.candidateType)!=='unknown') summary[stat.candidateType]++;
@@ -63,9 +76,34 @@
         const pair=stats.get(transport?.selectedCandidatePairId);
         if (!pair) return;
         const local=stats.get(pair.localCandidateId),remote=stats.get(pair.remoteCandidateId);
-        finish(JSON.stringify({local:candidateType(local?.candidateType),remote:candidateType(remote?.candidateType),protocol:protocol(local?.protocol),rtt:bounded((pair.currentRoundTripTime||0)*1000)}));
+        result={local:candidateType(local?.candidateType),remote:candidateType(remote?.candidateType),protocol:protocol(local?.protocol),
+          relayProtocol:['udp','tcp','tls'].includes(local?.relayProtocol)?local.relayProtocol:'unknown',
+          relayPort:local?.candidateType==='relay' && /^turns:turn\.cloudflare\.com:443(?:\?transport=tcp)?$/.test(local?.url||'')?443:0,
+          rtt:Number.isFinite(pair.currentRoundTripTime)?bounded(pair.currentRoundTripTime*1000):-1};
+        for (const [stat,previous,prefix] of [[pair,previousTraffic,''],[transport,previousTransport,'transport']]) {
+          if (!stat) continue;
+          const current={id:stat.id,time:stat.timestamp};
+          for (const field of ['bytesSent','bytesReceived','packetsSent','packetsReceived']) {
+            const key=prefix?prefix+field[0].toUpperCase()+field.slice(1):field;
+            current[field]=stat[field];
+            result[key]=Number.isFinite(stat[field])?bounded(stat[field]):-1;
+            const elapsed=previous && (current.time-previous.time)/1000;
+            result[key+'PerSecond']=previous?.id===current.id && elapsed>0 &&
+              Number.isFinite(stat[field]) && Number.isFinite(previous[field]) && stat[field]>=previous[field]
+              ?bounded((stat[field]-previous[field])/elapsed):-1;
+          }
+          // Keep pair and transport baselines distinct, including route changes.
+          if (!previous || previous.id!==current.id || current.time>previous.time) {
+            if(prefix)previousTransport=current;else previousTraffic=current;
+          }
+        }
       } catch {
-        enqueue(peer,{event:'ice_stats_unavailable'});
+        if(sequence>=completedSample) {
+          completedSample=sequence;
+          enqueue(peer,{event:'ice_stats_unavailable'});
+        }
+      } finally {
+        finish(JSON.stringify(result));
       }
     },
   });
@@ -87,7 +125,11 @@
         calls++;
         return api.ec_v1_command(handle, operation, a, b);
       },
-      destroy: (handle) => { api.ec_v1_destroy(handle); handles.delete(handle); },
+      destroy: (handle) => {
+        if (!handles.has(handle)) return;
+        api.ec_v1_destroy(handle);
+        handles.delete(handle);
+      },
       diagnostics: () => ({calls, live: handles.size, views: [...handles].map(h => ({tick: api.ec_v1_command(h,10,0,0), x: api.ec_v1_command(h,10,3,1), guestX: api.ec_v1_command(h,10,3,2), actors: api.ec_v1_command(h,10,2,1) + api.ec_v1_command(h,10,2,2), hp: api.ec_v1_command(h,10,1,0)}))}),
     });
     return globalThis.EmberCoreWeb;
