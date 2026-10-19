@@ -21,11 +21,13 @@ Deno.test('Every lobby action requires a valid key/origin/expiry and limiter, ne
  f.env.LOBBY_LIMIT.limit=()=>({success:false});check((await f.call({action:'list'}))[0]===429);
 });
 Deno.test('Atomic two-player join, idempotent creation, safe listing and seat ownership',async()=>{
- const f=fixture();const [status,room]=await f.call({action:'create',seat:host,name:'Friends'});check(status===200);
- check((await f.call({action:'create',seat:host,name:'Retry'}))[1].id===room.id);
+ const f=fixture();const [status,room]=await f.call({action:'create',seat:host,name:'Friends',retryCapable:true});check(status===200&&room.retrySupported,'Create must advertise retry before first sync');
+ const repeated=(await f.call({action:'create',seat:host,name:'Retry'}))[1];
+ check(repeated.id===room.id&&repeated.retrySupported);
  const list=(await f.call({action:'list'}))[1];check(list.rooms.length===1);check(!JSON.stringify(list).includes(host));
- const joins=await Promise.all([guest,third].map(seat=>f.call({action:'join',id:room.id,seat})));
+ const joins=await Promise.all([guest,third].map(seat=>f.call({action:'join',id:room.id,seat,retryCapable:true})));
  check(joins.filter(r=>r[0]===200).length===1&&joins.filter(r=>r[0]===409).length===1);
+ check(joins.find(r=>r[0]===200)[1].retrySupported,'Join must advertise retry before first sync');
  const rejectedSeat=joins[0][0]===409?guest:third;
  check((await f.call({action:'list'}))[1].rooms.length===0);
  check((await f.call({action:'sync',id:room.id,seat:rejectedSeat}))[0]===403);
@@ -159,14 +161,16 @@ Deno.test('Continuous public diagnostic uploads do not retain an abandoned room'
 });
 
 Deno.test('Compatibility retry is seat-authorized, idempotent and fences stale signals/readiness',async()=>{
- const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Retry'}))[1];
- await f.call({action:'join',id:room.id,seat:guest});
+ const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Retry',retryCapable:true}))[1];
+ await f.call({action:'join',id:room.id,seat:guest,retryCapable:true});
  const sync=(seat,extra={})=>f.call({action:'sync',id:room.id,seat,...extra});
  await sync(host,{signal:signal('offer'),ready:true});
  await sync(guest,{signal:signal('answer')});
  check((await sync(third,{retryTls:true}))[0]===403);
  check((await sync(host,{retryTls:'yes'}))[0]===400);
  check((await sync(host,{epoch:-1}))[0]===400);
+ check((await sync(guest,{retryTls:true,epoch:0,ready:'yes'}))[0]===400,'Retry bypassed readiness validation');
+ check((await sync(guest))[1].signal===signal('offer'),'Rejected retry changed room epoch/signals');
  const retried=(await sync(guest,{retryTls:true,epoch:0}))[1];
  check(retried.epoch===1&&retried.signal===''&&!retried.complete&&retried.retrySupported);
  // An old request cannot restore the prior offer or mark the new attempt ready.
@@ -174,7 +178,35 @@ Deno.test('Compatibility retry is seat-authorized, idempotent and fences stale s
  const fresh=signal('offer','b'.repeat(32));
  check((await sync(host,{epoch:1,signal:fresh}))[0]===200);
  check((await sync(guest,{retryTls:true,epoch:0}))[1].epoch===1);
+ check((await sync(host,{epoch:0,ready:'yes'}))[0]===400,'Stale epoch bypassed readiness validation');
  check((await sync(guest,{epoch:1}))[1].signal===fresh,'duplicate retry cleared fresh offer');
  check((await sync(guest,{epoch:1,signal:signal('answer','b'.repeat(32)),ready:true}))[1].complete===false,'stale readiness survived reset');
  check((await sync(host,{epoch:1,ready:true}))[1].complete===true);
+});
+
+Deno.test('Mixed client versions cannot strand a room in an unsupported TLS retry',async()=>{
+ const f=fixture();
+ const room=(await f.call({action:'create',seat:host,name:'Mixed',retryCapable:true}))[1];
+ check(room.retrySupported);
+ const joined=(await f.call({action:'join',id:room.id,seat:guest}))[1];
+ check(!joined.retrySupported,'Legacy guest advertised retry support');
+ const sync=(seat,extra={})=>f.call({action:'sync',id:room.id,seat,...extra});
+ check((await sync(host,{retryTls:true}))[1].error==='retry_unsupported');
+ check((await sync(host))[1].epoch===0,'Rejected retry changed epoch');
+ // A capable client can also advertise on sync for rooms created before upgrade.
+ check((await sync(guest,{retryCapable:true}))[1].retrySupported);
+ check((await sync(host,{retryTls:true}))[1].epoch===1);
+ check((await f.call({action:'join',id:room.id,seat:guest}))[1].error==='retry_unsupported','Old page joined a TLS retry it cannot follow');
+ const early=fixture();
+ const waiting=(await early.call({action:'create',seat:host,name:'Early',retryCapable:true}))[1];
+ check((await early.call({action:'sync',id:waiting.id,seat:host,retryTls:true}))[1].epoch===1);
+ check((await early.call({action:'join',id:waiting.id,seat:guest}))[0]===409,'Legacy late join accepted into TLS room');
+ check((await early.call({action:'join',id:waiting.id,seat:guest,retryCapable:true}))[0]===200);
+ check((await early.call({action:'sync',id:waiting.id,seat:guest}))[1].epoch===1,'Late capable guest did not learn TLS epoch');
+ const legacy=fixture();
+ const oldRoom=(await legacy.call({action:'create',seat:host,name:'Legacy'}))[1];
+ check(!oldRoom.retrySupported);
+ check(!(await legacy.call({action:'join',id:oldRoom.id,seat:guest,retryCapable:true}))[1].retrySupported,'Legacy host advertised retry support');
+ check((await legacy.call({action:'sync',id:oldRoom.id,seat:guest,retryTls:true,retryCapable:true}))[0]===409);
+ check((await legacy.call({action:'sync',id:oldRoom.id,seat:host,retryCapable:'yes'}))[0]===400);
 });

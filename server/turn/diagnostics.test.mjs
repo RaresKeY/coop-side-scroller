@@ -70,3 +70,13 @@ Deno.test('V3 distinguishes completed signaling from terminal transport failures
   const bad=structuredClone(v);edit(bad);check(!diagnosticReport(bad));
  }
 });
+
+Deno.test('V3 accepts bounded retry failure sources and the reload error code',()=>{
+ const v=report();v.build='diagnostics-v3';
+ v.context={commit:'unknown',payload:'unknown',built:'unknown',dirty:true,site:'local',test:'browser'};
+ for(const source of ['no_candidates','retry_unsupported']){
+  v.events=[{event:'failure',ms:0,role:'host',reason:'other',source,state:-1,established:false},
+   {event:'http',ms:1,role:'host',action:'sync',status:409,code:'retry_unsupported'}];
+  check(diagnosticReport(v),'Retry failure rejected the diagnostic batch');
+ }
+});

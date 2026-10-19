@@ -228,15 +228,17 @@ export class PrivateLobbies {
    return Response.json({version:1,rooms:Object.entries(rooms).filter(([,r])=>!r.guest).map(([id,r])=>({id,name:r.name,players:1,capacity:2,protocol:1}))});
   }
   if(typeof data.seat!=='string'||!SEAT.test(data.seat))return reply(400,'invalid_seat');
+  if(data.retryCapable!==undefined && typeof data.retryCapable!=='boolean')return reply(400,'invalid_request');
+  const canRetry=room=>!!room.hostRetry && (!room.guest||!!room.guestRetry);
   if(data.action==='create') {
    // A client-generated random seat makes a retried creation idempotent.
    const existing=Object.entries(rooms).find(([,r])=>r.host===data.seat);
-   if(existing)return Response.json({version:1,id:existing[0],role:'host'});
+   if(existing)return Response.json({version:1,id:existing[0],role:'host',retrySupported:canRetry(existing[1])});
    if(Object.keys(rooms).length>=ROOM_LIMIT)return reply(429,'rooms_full');
    if(typeof data.name!=='string'||!data.name.trim()||data.name.length>32||/[\x00-\x1f\x7f]/.test(data.name))return reply(400,'invalid_name');
    let id;do{id=crypto.randomUUID().replaceAll('-','').slice(0,8).toUpperCase();}while(rooms[id]);
-   rooms[id]={name:data.name.trim(),host:data.seat,guest:null,hostSeen:now,guestSeen:now,expires:now+ROOM_LIFETIME_MS,offer:'',answer:'',hostReady:false,guestReady:false};
-   await save();return Response.json({version:1,id,role:'host'});
+   rooms[id]={name:data.name.trim(),host:data.seat,guest:null,hostSeen:now,guestSeen:now,expires:now+ROOM_LIFETIME_MS,offer:'',answer:'',hostReady:false,guestReady:false,hostRetry:data.retryCapable===true,guestRetry:false};
+   await save();return Response.json({version:1,id,role:'host',retrySupported:canRetry(rooms[id])});
   }
   if(typeof data.id!=='string'||!CODE.test(data.id))return reply(400,'invalid_room');
   const room=rooms[data.id];
@@ -244,14 +246,18 @@ export class PrivateLobbies {
   if(data.action==='join') {
    if(data.seat===room.host)return reply(409,'own_room');
    if(room.guest && room.guest!==data.seat)return reply(409,'room_full');
-   room.guest=data.seat;room.guestSeen=now;await save();
-   return Response.json({version:1,id:data.id,role:'client'});
+   if(room.epoch && data.retryCapable!==true)return reply(409,'retry_unsupported');
+   room.guest=data.seat;room.guestSeen=now;room.guestRetry=room.guestRetry||data.retryCapable===true;await save();
+   return Response.json({version:1,id:data.id,role:'client',retrySupported:canRetry(room)});
   }
   const host=data.seat===room.host;
   if(!host && data.seat!==room.guest)return reply(403,'seat_denied');
   if(data.action==='leave') {await this.cleanupEvent(data.id,host?'host_leave':'guest_leave');delete rooms[data.id];await save();return Response.json({version:1,closed:true});}
+  if(data.ready!==undefined && typeof data.ready!=='boolean')return reply(400,'invalid_ready');
   if(data.retryTls!==undefined && typeof data.retryTls!=='boolean')return reply(400,'invalid_request');
   if(data.epoch!==undefined && (!Number.isInteger(data.epoch)||data.epoch<0||data.epoch>1))return reply(400,'invalid_request');
+  if(data.retryCapable===true)room[host?'hostRetry':'guestRetry']=true;
+  if(data.retryTls && !canRetry(room))return reply(409,'retry_unsupported');
   // One idempotent compatibility retry per room, authorized by seat membership.
   // Epoch fencing prevents in-flight UDP signals/readiness contaminating TLS.
   if(data.retryTls && !room.epoch) {
@@ -259,9 +265,8 @@ export class PrivateLobbies {
   }
   room[host?'hostSeen':'guestSeen']=now;
   if((data.epoch??0)!==(room.epoch??0)) {
-   await save();return Response.json({version:1,id:data.id,players:room.guest?2:1,epoch:room.epoch??0,retrySupported:true,signal:'',complete:false});
+   await save();return Response.json({version:1,id:data.id,players:room.guest?2:1,epoch:room.epoch??0,retrySupported:canRetry(room),signal:'',complete:false});
   }
-  if(data.ready!==undefined && typeof data.ready!=='boolean')return reply(400,'invalid_ready');
   if(data.signal!==undefined && data.signal!=='') {
    const envelope=signalEnvelope(data.signal,host?'host':'client');
    if(!envelope)return reply(400,'invalid_signal');
@@ -272,7 +277,7 @@ export class PrivateLobbies {
   }
   room[host?'hostSeen':'guestSeen']=now;
   if(data.ready)room[host?'hostReady':'guestReady']=true;
-  const result={version:1,id:data.id,epoch:room.epoch??0,retrySupported:true,players:room.guest?2:1,signal:host?room.answer:room.offer,complete:room.hostReady&&room.guestReady};
+  const result={version:1,id:data.id,epoch:room.epoch??0,retrySupported:canRetry(room),players:room.guest?2:1,signal:host?room.answer:room.offer,complete:room.hostReady&&room.guestReady};
   // Signaling ends once both browsers are connected. Gameplay keeps running.
   if(result.complete){await this.cleanupEvent(data.id,'connected');delete rooms[data.id];}
   await save();return Response.json(result);
@@ -301,7 +306,7 @@ export function diagnosticReport(value) {
   if(!['firebase','pages','local','other'].includes(c.site)||!['none','runpod','browser'].includes(c.test))return null;
  }
  const actions=['ice','list','create','join','sync','leave','unknown'];
- const codes=["access_denied","origin_denied","rate_limited","limiter_unavailable","issuer_not_configured","lobby_not_configured","lobby_unavailable","invalid_lobby_request","relay_provider_failed",'ok','unknown_error','room_expired','room_full','own_room','signal_already_set','session_mismatch','seat_denied','invitation_expired','invalid_request','invalid_seat','invalid_room','invalid_name','invalid_signal','invalid_ready','rooms_full'];
+ const codes=["access_denied","origin_denied","rate_limited","limiter_unavailable","issuer_not_configured","lobby_not_configured","lobby_unavailable","invalid_lobby_request","relay_provider_failed",'ok','unknown_error','room_expired','room_full','own_room','signal_already_set','session_mismatch','seat_denied','invitation_expired','invalid_request','invalid_seat','invalid_room','invalid_name','invalid_signal','invalid_ready','rooms_full','retry_unsupported'];
  const shapes={ice_candidates:['host','srflx','prflx','relay'],ice_stats_unavailable:[],ice_state:['gathering','ice'],ice_error:['server','code'],ice_stats:['host','srflx','prflx','relay','pairs','failed','checking','succeeded','requests','responses'],transport:['local','remote','protocol','rtt'],begin:[],leave:[],failure:['reason'],rtc:['state'],visibility:['visible'],summary:['rtt','rx','tx','gaps','actors'],http:['action','status','code'],room:['room'],rtc_begin:['route']};
  if(v3){shapes.lobby_end=['cause'];shapes.failure.push('source','state','established');shapes.network=['online'];shapes.transport.push('relayProtocol','relayPort',...['bytesSent','bytesReceived','packetsSent','packetsReceived'].flatMap(k=>[k,k+'PerSecond','transport'+k[0].toUpperCase()+k.slice(1),'transport'+k[0].toUpperCase()+k.slice(1)+'PerSecond']));}
  for(const event of value.events) {
@@ -317,7 +322,7 @@ export function diagnosticReport(value) {
    else if(key==='protocol'){if(!['udp','tcp','unknown'].includes(v))return null;}
    else if(key==='relayProtocol'){if(!['udp','tcp','tls','unknown'].includes(v))return null;}
    else if(key==='relayPort'){if(![0,443].includes(v))return null;}
-   else if(key==='source'){if(!['setup','multiplayer_disconnect','multiplayer_connect_failed','rtc_terminal','disconnect_timeout','connect_timeout','gather_timeout','lobby_errors'].includes(v))return null;}
+   else if(key==='source'){if(!['setup','multiplayer_disconnect','multiplayer_connect_failed','rtc_terminal','disconnect_timeout','connect_timeout','gather_timeout','no_candidates','retry_unsupported','lobby_errors'].includes(v))return null;}
    else if(key==='cause'){if(!['complete','error_after_connected'].includes(v))return null;}
    else if(key==='established'){if(typeof v!=='boolean')return null;}
    else if(key==='online'){if(typeof v!=='boolean')return null;}

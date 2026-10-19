@@ -80,6 +80,7 @@ func request_data(data: Dictionary, request_generation: int) -> Dictionary:
  request.max_redirects = 0
  add_child(request)
  data.version = 1
+ data.retryCapable = true
  if game.diagnostics != null: data.diagnostic = game.diagnostics.id
  var error = request.request(ENDPOINT,["Authorization: Bearer "+game.relay_access.text.strip_edges(),"Content-Type: application/json"],HTTPClient.METHOD_POST,JSON.stringify(data))
  if error != OK:
@@ -105,11 +106,12 @@ func request_data(data: Dictionary, request_generation: int) -> Dictionary:
 
 # Display only bounded machine codes, never arbitrary response bodies or secrets.
 func safe_code(code) -> String:
- var known = ["access_denied","origin_denied","rate_limited","limiter_unavailable","issuer_not_configured","lobby_not_configured","lobby_unavailable","invalid_lobby_request","relay_provider_failed","room_expired","room_full","own_room","signal_already_set","session_mismatch","seat_denied","invitation_expired","invalid_request","invalid_seat","invalid_room","invalid_name","invalid_signal","invalid_ready","rooms_full"]
+ var known = ["access_denied","origin_denied","rate_limited","limiter_unavailable","issuer_not_configured","lobby_not_configured","lobby_unavailable","invalid_lobby_request","relay_provider_failed","room_expired","room_full","own_room","signal_already_set","session_mismatch","seat_denied","invitation_expired","invalid_request","invalid_seat","invalid_room","invalid_name","invalid_signal","invalid_ready","rooms_full","retry_unsupported"]
  return str(code) if code is String and (code in known or code == "ok") else "unknown_error"
 
 func service_error(status: int, code) -> String:
  var reason = safe_code(code)
+ if reason == "retry_unsupported": return "Both players must reload the game before a compatibility retry (HTTP %d · %s)" % [status,reason]
  var message = "Access code invalid or expired" if status in [401,403] else "Too many requests; wait a minute" if status == 429 else "Room full, closed or expired; refresh and try again" if status in [404,409] else "Room service unavailable"
  return "%s (HTTP %d · %s)" % [message,status,reason]
 
@@ -198,6 +200,7 @@ func enter_room(action: String, id: String = ""):
   return
  room_id = result.id
  role = result.role
+ retry_supported = result.get("retrySupported",false) == true
  accepted = false
  published = false
  transport_established = false
@@ -217,9 +220,10 @@ func enter_room(action: String, id: String = ""):
  next_poll = 0
 
 func offer_compatibility_retry(message: String, source: String) -> bool:
+ remember_connection()
  if not active or room_id.is_empty() or transport_established or epoch != 0 or game.rtc_route_mode == 3 or not retry_supported:
   return false
- if source not in ["rtc_terminal","connect_timeout","gather_timeout","no_candidates","multiplayer_connect_failed"]:
+ if source not in ["rtc_terminal","connect_timeout","gather_timeout","no_candidates","disconnect_timeout","multiplayer_connect_failed"]:
   return false
  game.reset_network()
  game.mode = "solo"
@@ -246,7 +250,7 @@ func restart_compatibility(attempt: int):
  game.mode = "solo"
  game.core.configure(1)
  game.sync_core_view()
- game.connection_route.select(3)
+ if not game.setup_menu.visible: panel.show()
  game.pairing_role = role
  hint.text = "Retrying both players with Compatibility (TLS 443)…"
  busy = true
@@ -297,7 +301,10 @@ func sync_room():
  if result.get("epoch",0) == 1 and epoch == 0:
   await restart_compatibility(attempt)
   return
- if setup_failed: return
+ if setup_failed:
+  if not retry_supported:
+   game.rtc_fail("Both players must reload the game before a compatibility retry","retry_unsupported")
+  return
  if not signal_code.is_empty(): published = true
  if transport_established:
   panel.hide()
@@ -306,8 +313,9 @@ func sync_room():
    game.diagnostics.record("lobby_end",{"cause":"complete"})
    active = false
   return
- hint.text = "Room %s · %s" % [room_id,"connecting automatically…" if result.get("players",1)==2 else "waiting for partner…"]
- game.status.text = "Private room · automatic connection setup"
+ var route_hint = "Compatibility (TLS 443)" if epoch == 1 else "connecting automatically…"
+ hint.text = "Room %s · %s" % [room_id,route_hint if result.get("players",1)==2 else "waiting for partner…"]
+ game.status.text = "Private room · Compatibility (TLS 443)" if epoch == 1 else "Private room · automatic connection setup"
  var incoming = result.get("signal","")
  if not accepted and incoming is String and not incoming.is_empty():
   if game.ConnectionCodes.decode(incoming).is_empty():

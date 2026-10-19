@@ -373,6 +373,12 @@ func request_relay_credentials(generation: int) -> Dictionary:
  if credentials.is_empty(): rtc_fail("Relay returned invalid or expired credentials")
  return credentials
 
+func selected_connection_route() -> int:
+ # A coordinated retry owns this attempt's route, independent of menu edits.
+ if lobby != null and lobby.active and not lobby.room_id.is_empty() and lobby.epoch == 1:
+  return 3
+ return connection_route.selected
+
 func rtc_begin(server: bool, session: String = "") -> bool:
  if not OS.has_feature("web"):
   status.text = "WebRTC connection codes run in the browser build. Native Host/Join uses LAN UDP."
@@ -381,10 +387,11 @@ func rtc_begin(server: bool, session: String = "") -> bool:
   status.text = "Getting relay access • please wait"
   return false
  if diagnostics != null and (lobby == null or not lobby.active): diagnostics.begin()
- diagnostics.record("rtc_begin",{"role":"host" if server else "client","route":connection_route.selected})
+ var route = selected_connection_route()
+ diagnostics.record("rtc_begin",{"role":"host" if server else "client","route":route})
  reset_network()
  var generation = connection_generation
- rtc_route_mode = connection_route.selected
+ rtc_route_mode = route
  var configuration = {"iceServers":[{"urls":["stun:stun.l.google.com:19302"]}],"iceTransportPolicy":"all"}
  if rtc_route_mode != 2:
   rtc_issuing = true
