@@ -13,7 +13,12 @@
     let calls = 0;
     globalThis.EmberCoreWeb = Object.freeze({
       create: () => { const h = api.ec_v1_create(0x10000, 1, 1); if (h) handles.add(h); return h; },
-      command: (handle, operation, a, b) => { calls++; return api.ec_v1_command(handle, operation, a, b); },
+      command: (handle, operation, a=0, b=0) => {
+        if (!handles.has(handle)) return -1;
+        if (![operation,a,b].every(n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647)) return -2;
+        calls++;
+        return api.ec_v1_command(handle, operation, a, b);
+      },
       destroy: (handle) => { api.ec_v1_destroy(handle); handles.delete(handle); },
       diagnostics: () => ({calls, live: handles.size, views: [...handles].map(h => ({tick: api.ec_v1_command(h,10,0,0), x: api.ec_v1_command(h,10,3,1), guestX: api.ec_v1_command(h,10,3,2), actors: api.ec_v1_command(h,10,2,1) + api.ec_v1_command(h,10,2,2), hp: api.ec_v1_command(h,10,1,0)}))}),
     });
@@ -81,12 +86,13 @@ globalThis.EmberClipboard = (() => {
     },
     copy: (text, finish) => {
       if (typeof text !== 'string' || !text || text.length > 65536 || cancel) { finish(false); return; }
-      let settled = false, overlay = null, timer = null;
+      let settled = false, overlay = null, timer = null, codeField = null;
       const previous = document.activeElement;
       const done = success => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (codeField) codeField.value = '';
         overlay?.remove();
         overlay = null;
         text = '';
@@ -118,6 +124,7 @@ globalThis.EmberClipboard = (() => {
         close.dataset.emberCancel = '';
         close.style.cssText = 'min-height:44px;padding:8px 20px;';
         const field = document.createElement('textarea');
+        codeField = field;
         field.value = text;
         field.setAttribute('readonly', '');
         field.setAttribute('aria-label', 'Your connection code');
@@ -132,8 +139,13 @@ globalThis.EmberClipboard = (() => {
         };
         close.onclick = () => done(false);
         overlay.onkeydown = event => {
+          event.stopPropagation();
           if (event.key === 'Escape') { event.preventDefault(); done(false); }
-          if (event.key === 'Tab') { event.preventDefault(); (document.activeElement === copy ? close : copy).focus(); }
+          if (event.key === 'Tab') {
+            event.preventDefault();
+            const focus = [field, copy, close];
+            focus[(focus.indexOf(document.activeElement) + (event.shiftKey ? 2 : 1)) % 3].focus();
+          }
         };
         panel.append(title, hint, field, copy, close);
         overlay.append(panel);
@@ -141,7 +153,8 @@ globalThis.EmberClipboard = (() => {
         copy.focus();
       };
       timer = setTimeout(fallback, 5000);
-      try { Promise.resolve(navigator.clipboard.writeText(text)).then(() => done(true), fallback); }
+      // Once the fallback is visible, only its explicit actions may dismiss it.
+      try { Promise.resolve(navigator.clipboard.writeText(text)).then(() => { if (!overlay) done(true); }, fallback); }
       catch { fallback(); }
     },
   });
