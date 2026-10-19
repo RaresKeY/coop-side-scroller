@@ -32,3 +32,14 @@ Deno.test('Failed ICE reports accept bounded enums/counts but reject private ser
   const invalid=structuredClone(value);change(invalid);check(!diagnosticReport(invalid));
  }
 });
+
+Deno.test('Diagnostic malformed bodies differ from storage outages on each hosted origin',async()=>{
+ const env={TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master',PLAYTEST_TOKEN:'invitation',INVITE_EXPIRES_AT:String(Math.floor(Date.now()/1000)+600),ISSUE_LIMIT:{},TOTAL_LIMIT:{},DIAGNOSTIC_LIMIT:{limit:()=>({success:true})},DIAGNOSTIC_TOTAL:{limit:()=>({success:true})},LOBBIES:{idFromName:x=>x,get:()=>({fetch:()=>{throw Error('private storage failure');}})}};
+ for(const origin of ['https://rareskey.github.io','https://ember-bridge-playtest.web.app','https://ember-bridge-playtest.firebaseapp.com']){
+  const send=body=>handle(new Request('https://issuer.example/v1/diagnostics',{method:'POST',headers:{Origin:origin,Authorization:'Bearer invitation'},body}),env);
+  const malformed=await send('{');check(malformed.status===400);
+  const outage=await send(JSON.stringify(report()));check(outage.status===503);
+  check((await outage.json()).error==='diagnostics_unavailable');
+  check(outage.headers.get('Access-Control-Allow-Origin')===origin);
+ }
+});

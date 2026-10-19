@@ -85,3 +85,5 @@ With failed-ICE collection enabled, the first two-browser regression connected a
 ## Firebase static deployment
 
 The new Firebase Hosting project/site `ember-bridge-playtest` serves https://ember-bridge-playtest.web.app/. Hosted HTML, engine JS/PCK/Wasm, core Wasm and bridge SHA-256 match the prepared candidate. Hosted Chromium startup and real keyboard movement pass. The Firebase origin receives successful lobby CORS preflight and authenticated directory responses from the existing issuer after its allowlist update. The hosted same-machine two-browser private-lobby test also passes forced relay/relay traffic, replicated movement/combat, diagnostic uploads and terminal-failure reporting. This does not prove a new cross-network route.
+
+Source review checks: 19 Worker/lobby/diagnostic tests, five ICE helper tests and eight publication-tool tests pass. Diagnostic parsing failures remain HTTP 400, while journal exceptions return HTTP 503; the regression covers GitHub and both Firebase origins. The publication secret audit reports no findings.

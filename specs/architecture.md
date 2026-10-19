@@ -1,6 +1,6 @@
 # Current architecture
 
-Ember Bridge is a two-player, host-authoritative co-op prototype built around an engine-independent C++17 library. Godot is the working reference adapter. The browser game runs from GitHub Pages and uses a protected Cloudflare service for private room discovery, connection signaling and temporary TURN credentials. Gameplay travels over WebRTC directly or through TURN. The native development lab uses ENet instead.
+Ember Bridge is a two-player, host-authoritative co-op prototype built around an engine-independent C++17 library. Godot is the working reference adapter. The browser game runs from GitHub Pages or its Firebase Hosting mirror and uses a protected Cloudflare service for private room discovery, connection signaling and temporary TURN credentials. Gameplay travels over WebRTC directly or through TURN. The native development lab uses ENet instead.
 
 ## Ownership
 
@@ -14,7 +14,7 @@ Ember Bridge is a two-player, host-authoritative co-op prototype built around an
 | `src/private_lobby.gd`, `src/relay_credentials.gd`, `src/connection_codes.gd` | HTTP setup, credential validation and versioned signaling envelopes | Connection metadata stays outside the core |
 | `server/turn/worker.mjs` | Playtest-key authorization, temporary ICE issuance, private room directory/signaling | `/v1/ice` and `/v1/lobby`; one SQLite Durable Object holds bounded setup records |
 | Cloudflare TURN | Forwarding encrypted WebRTC traffic when selected | No simulation or gameplay authority |
-| GitHub Pages | Static HTML, Godot engine/export, core Wasm and notices | No server execution or credentials embedded in the page |
+| GitHub Pages / Firebase Hosting | Static HTML, Godot engine/export, core Wasm and notices | No server execution or credentials embedded in the page |
 | `labs/` | Native worker lifecycle, two keyboard schemes, delay controls and telemetry | Separate processes/cores communicate through real ENet; controller sends no world state |
 
 The core does not own clocks, input devices, rendering, audio, assets, engine physics, HTTP or network transports. Its simple floor/arena rules are implemented in C++; integration with an engine collision scene is not supplied. The host is trusted. The shared playtest key controls service access, not host honesty or individual player identity.

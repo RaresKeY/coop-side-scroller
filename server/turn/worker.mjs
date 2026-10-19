@@ -66,12 +66,13 @@ async function handleRequest(request,env,fetcher=(url,options)=>fetch(url,option
  const now=Math.floor(Date.now()/1000);
  if(!Number.isSafeInteger(Number(env.INVITE_EXPIRES_AT)) || now>=Number(env.INVITE_EXPIRES_AT))return reply(403,'invitation_expired');
  if(diagnostic) {
+  let report;
+  try {report=await readBounded(request);}catch{return reply(400,'invalid_diagnostics');}
   try {
    if(!env.DIAGNOSTIC_TOTAL || !(await env.DIAGNOSTIC_TOTAL.limit({key:'diagnostics'})).success)return reply(429,'rate_limited');
-   const report=await readBounded(request);
    const stub=env.LOBBIES.get(env.LOBBIES.idFromName('private-playtest-v1'));
    if(operator){
-    if(report.action!=='read'||(report.attempt!==undefined&&!/^[a-f0-9]{16}$/.test(report.attempt)))return reply(400,'invalid_diagnostics');
+    if(!report||report.action!=='read'||(report.attempt!==undefined&&!/^[a-f0-9]{16}$/.test(report.attempt)))return reply(400,'invalid_diagnostics');
     const result=await stub.fetch(new Request('https://diagnostics.internal/',{method:'POST',body:JSON.stringify({action:'diagnostics_read',attempt:report.attempt})}));
     return new Response(result.body,{status:result.status,headers});
    }
@@ -81,7 +82,7 @@ async function handleRequest(request,env,fetcher=(url,options)=>fetch(url,option
    const saved=await stub.fetch(new Request('https://diagnostics.internal/',{method:'POST',body:JSON.stringify({action:'diagnostics_record',entry:{kind:'browser',...clean}})}));
    if(!saved.ok)return reply(503,'diagnostics_unavailable');
    return Response.json({version:1,accepted:true},{headers});
-  } catch {return reply(400,'invalid_diagnostics');}
+  } catch {return reply(503,'diagnostics_unavailable');}
  }
  if(lobby) {
   if(!env.LOBBIES || !env.LOBBY_TOTAL)return reply(503,'lobby_not_configured');

@@ -1,6 +1,6 @@
 # Co-op Side Scroller specs
 
-Start with [current architecture](architecture.md): portable C++ core, Godot native/Web adapters, private Cloudflare lobbies and TURN, and GitHub Pages hosting.
+Start with [current architecture](architecture.md): portable C++ core, Godot native/Web adapters, private Cloudflare lobbies and TURN, and GitHub Pages/Firebase static hosting.
 
 `specs/` describes implemented contracts and recorded verification. `design/` explains decisions, network implications and integration guidance. `BACKLOG.md` contains future work. Preserve historical detail only when it explains a current choice or an evidence boundary; implementation chronology belongs in Git history. A recorded test result is not a claim about every subsequent build.
 
