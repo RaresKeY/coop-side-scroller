@@ -35,7 +35,7 @@ python3 tools/build_core.py --check  # freshness only, never builds or downloads
 deno test --no-config server/turn/worker.test.mjs server/turn/lobby.test.mjs
 ```
 
-`tests/core.sh` requires installed GCC/Clang/wasm-ld/Deno; tests/web.sh additionally needs installed Chromium/Gamescope. No package installation or remote module execution occurs. Deno is run without network permission and with read access restricted to build outputs. Native graphics use the owning shared Godot Podman wrapper and Gamescope, muted/Dummy audio. Headless checks do not prove hardware rendering.
+`tests/core.sh` requires installed GCC/Clang/wasm-ld/Deno; tests/web.sh additionally needs installed Chromium/Gamescope. No package installation or remote module execution occurs. Deno is run without network permission and with read access restricted to build outputs plus the production bridge source for its real-Wasm handle-lifetime regression. Native graphics use the owning shared Godot Podman wrapper and Gamescope, muted/Dummy audio. Headless checks do not prove hardware rendering.
 
 Live browser tests use the protected deployed service and privately configured playtest key. With a prepared local Web candidate:
 

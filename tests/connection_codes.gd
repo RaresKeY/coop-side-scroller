@@ -44,6 +44,11 @@ func _initialize():
   var invalid = credentials.duplicate(true)
   invalid.merge(patch,true)
   check(relay.decode(JSON.stringify(invalid).to_utf8_buffer(),now).is_empty(),"Invalid relay credentials accepted")
+ var mixed = [{"urls":["stun:stun.cloudflare.com:3478","turn:turn.cloudflare.com:3478?transport=udp","turns:turn.cloudflare.com:5349?transport=tcp","turns:turn.cloudflare.com:443?transport=tcp"],"username":"u","credential":"c"}]
+ var tls = relay.tls_only(mixed)
+ check(tls.size()==1 and tls[0].urls==["turns:turn.cloudflare.com:443?transport=tcp"] and tls[0].credential=="c","TLS route allowed another transport or lost credentials")
+ check(mixed[0].urls.size()==4,"TLS filtering modified shared credentials")
+ check(relay.tls_only([{"urls":["turn:turn.cloudflare.com:443?transport=tcp"]}]).is_empty(),"TLS route silently accepted non-TLS server")
  call_deferred("scene_checks")
 
 func scene_checks():
@@ -182,6 +187,7 @@ func scene_checks():
  fake_lobby.sync_room()
  fake_lobby.complete_request.emit()
  check(scene.rtc == live_peer and not fake_lobby.active and not fake_lobby.panel.visible,"Signaling cleanup terminated connected gameplay")
+ check(scene.diagnostics.events.back().event == "lobby_end" and scene.diagnostics.events.back().cause == "error_after_connected","Cleanup decision not diagnosed")
  # ICE may finish after sync starts but before a missing-room response arrives.
  fake_lobby.active = true
  fake_lobby.panel.show()
@@ -220,6 +226,8 @@ func scene_checks():
   check(scene.rtc == live_peer and not fake_lobby.active,"Lobby forgot established transport between sync polls")
   scene.rtc_update(131001)
   check(scene.rtc == null,"Established lobby bypassed terminal disconnect timeout")
+  var failure_events = scene.diagnostics.events.filter(func(e): return e.event == "failure")
+  check(failure_events.back().source == "disconnect_timeout" and failure_events.back().established,"Failure lost pre-teardown source/establishment")
  check(not fake_lobby.transport_established,"Lobby close retained establishment for the next attempt")
  # Before the first connection, setup still fails after three sync errors.
  var unconnected = FakeRTC.new()
@@ -232,6 +240,8 @@ func scene_checks():
  fake_lobby.sync_room()
  fake_lobby.complete_request.emit()
  check(scene.rtc == null and not fake_lobby.active,"Unestablished setup ignored its sync failure limit")
+ var setup_failures = scene.diagnostics.events.filter(func(e): return e.event == "failure")
+ check(setup_failures.back().source == "lobby_errors" and not setup_failures.back().established,"Setup failure attribution incorrect")
  fake_lobby.room_id = "" # Fixture cleanup needs no HTTP leave.
  scene.solo()
  print("CONNECTION CODE/SETUP TEST ","FAIL" if failed else "PASS")

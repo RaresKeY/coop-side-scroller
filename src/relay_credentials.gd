@@ -31,3 +31,14 @@ static func decode(body: PackedByteArray, unix_now: float) -> Dictionary:
    has_relay = true
   safe.append(item)
  return {"iceServers":safe,"expiresAt":int(expiry)} if has_relay else {}
+
+# Only use validated issuer entries; never silently fall back to UDP.
+static func tls_only(servers: Array) -> Array:
+ var filtered: Array = []
+ for entry in servers:
+  var urls: Array = []
+  for url in entry.urls:
+   if url in ["turns:turn.cloudflare.com:443", "turns:turn.cloudflare.com:443?transport=tcp"]: urls.append(url)
+  if not urls.is_empty():
+   filtered.append({"urls":urls,"username":entry.username,"credential":entry.credential})
+ return filtered

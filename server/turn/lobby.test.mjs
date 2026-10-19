@@ -122,3 +122,38 @@ Deno.test('Diagnostic journal bounds, expiry and reserved-action isolation',asyn
  f.store.set('diagnostics',[{kind:'lobby',at:Date.now()-8*86400000}]);
  await f.object.alarm();check(!f.store.has('diagnostics'),'Old diagnostics retained');
 });
+
+Deno.test('Journal writes and other rooms cannot postpone the earliest seat lease',async()=>{
+ const original=Date.now;let now=original();Date.now=()=>now;
+ try {
+  const f=fixture();const room=(await f.call({action:'create',seat:host,name:'First'}))[1];
+  const deadline=f.store.get('room:'+room.id).hostSeen+90000;
+  now+=45000;
+  await f.call({action:'create',seat:third,name:'Second'});
+  check(f.alarm()===deadline,'creation postponed the first lease');
+  await f.object.fetch(new Request('https://diagnostics.internal/',{method:'POST',body:JSON.stringify({action:'diagnostics_record',entry:{kind:'browser'}})}));
+  check(f.alarm()===deadline,'diagnostics postponed the first lease');
+  now=deadline;await f.object.alarm();
+  check(!f.store.has('room:'+room.id),'expired room retained');
+  check(f.alarm()===deadline+45000,'next room lease not scheduled');
+ } finally {Date.now=original;}
+});
+
+Deno.test('Continuous public diagnostic uploads do not retain an abandoned room',async()=>{
+ const original=Date.now;let now=original();Date.now=()=>now;
+ try {
+  const f=fixture(),start=now;
+  f.env.INVITE_EXPIRES_AT=String(Math.floor(now/1000)+3600);
+  f.env.DIAGNOSTIC_LIMIT=f.env.DIAGNOSTIC_TOTAL={limit:()=>({success:true})};
+  const room=(await f.call({action:'create',seat:host,name:'Abandoned'}))[1];
+  let alarms=0;
+  for(let i=1;i<=45;i++){
+   now=start+i*15000;
+   if(f.alarm()!==null&&f.alarm()<=now){await f.object.alarm();alarms++;}
+   const response=await handle(new Request('https://issuer.example/v1/diagnostics',{method:'POST',headers:{Origin:'https://rareskey.github.io',Authorization:'Bearer test-private'},body:JSON.stringify({version:1,build:'diagnostics-v2',attempt:'a'.repeat(16),events:[{event:'begin',role:'client',ms:0}]})}),f.env);
+   check(response.status===200,'diagnostic upload rejected');
+   if(now-start>=90000)check(!f.store.has('room:'+room.id),'uploads retained an expired room');
+  }
+  check(alarms===1,'room expiry postponed or journal unnecessarily wakes every lease');
+ } finally {Date.now=original;}
+});

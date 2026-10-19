@@ -1,6 +1,6 @@
 # Conventions and safety review — 2026-10-19
 
-Scope: committed baseline `9d35b09` plus the in-progress browser-entry/diagnostics changes present during review. [Terminology](../specs/terminology.md) was created first to distinguish user-facing names, ABI/transport identities, access credentials, connection metadata and timing measurements. This review changes documentation only; implementation findings below remain open. Concurrent diagnostics work was re-read before recording findings.
+Scope: committed baseline `9d35b09` plus the in-progress browser-entry/diagnostics changes present during review. [Terminology](../specs/terminology.md) was created first to distinguish user-facing names, ABI/transport identities, access credentials, connection metadata and timing measurements. The original review changed documentation only; findings were open at that snapshot. See the local follow-up resolution below for subsequent patches. Concurrent diagnostics work was re-read before recording findings.
 
 ## Findings
 
@@ -41,3 +41,11 @@ Suggested correction: require an exact live bridge-owned handle before calling t
 Sanitized local output: `build/conventions-safety-probes.json`; suite output: `build/conventions-review-worker-tests.log`. `build/conventions-review-snapshot-path.txt` records the temporary source snapshot used for the offline probes, with source hashes and `probe.mjs`. These files are ignored evidence, not public credentials or production code. The snapshot includes synthetic credentials only in the probe and makes no network requests. Local temporary evidence may later be removed; the steps and expected outcomes above are the durable reproduction record.
 
 Recheck findings against later implementation changes before treating this dated review as current status. Source and exported-build versions remain separate; no claim is made that the in-progress diagnostics code is the currently hosted build.
+
+## Local follow-up resolution
+
+Both P2 findings are addressed in the current uncommitted checkout. Room scheduling now preserves the earliest actual seat/lifetime/journal deadline; the public-handler regression sends 45 diagnostic uploads at 15-second intervals, services due alarms, and verifies removal at 90 seconds while uploads continue through 675 seconds. This supplements the earlier earliest-deadline regression.
+
+Wasm `destroy()` now requires exact membership in the bridge-owned set before invoking the export. Invalid numeric aliases, fractional/string/nonfinite values and duplicate destruction are harmless no-ops. A regression executes the production boot code against the actual prepared Wasm and verifies a second instance and the live registry survive. It failed against the pre-fix bridge and passes with the guard. Raw offsets remain subject to the documented caller lifetime rule after storage reuse; this is not a generational handle redesign.
+
+The separate TODO replica rejoin defect was also reproduced and patched: inactive-to-active snapshots trigger attack cues only for a currently active attack, while continuous-actor attack-ID changes retain their existing behavior. Native and Wasm regressions cover idle rejoin, the next real attack and joining mid-attack. No wire/ABI version changed. These are local fixes, not deployment evidence; earlier review observations above describe their original snapshot.

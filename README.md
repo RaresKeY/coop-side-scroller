@@ -1,6 +1,6 @@
 # Ember Bridge — portable co-op prototype
 
-[Play in browser](https://rareskey.github.io/coop-side-scroller/) · [Public source](https://github.com/RaresKeY/coop-side-scroller) · [Architecture](specs/architecture.md) · [Specs index](specs/_readme.md)
+[Play on GitHub Pages](https://rareskey.github.io/coop-side-scroller/) · [Play on Firebase](https://ember-bridge-playtest.web.app/) · [Public source](https://github.com/RaresKeY/coop-side-scroller) · [Architecture](specs/architecture.md) · [Specs index](specs/_readme.md)
 
 A two-player side-scroller with an engine-independent C++17 simulation and a Godot 4.7 reference game. The core owns movement/combat, inputs, automatic animation states, host authority and snapshots behind a versioned C ABI. Adapters own rendering, controls, clocks, assets and network transports. Native and browser builds use the same core sources.
 
@@ -12,9 +12,9 @@ The scene contains one animated saber fighter per player, a square-tile floor an
 2. Open **Private rooms**. One player clicks **Create room**; the other clicks **Join** on that room.
 3. Keep both pages open until connected. Move with **A/D**, jump with **W**, attack with **F**.
 
-The game exchanges connection details and obtains temporary TURN credentials automatically. **Direct + relay fallback** is the default; **Relay only (test)** forces TURN and shows diagnostics. The shared key authorizes room access and relay usage, not Cloudflare account administration. It stays in page memory and expires under the service's invitation policy.
+The game exchanges connection details and obtains temporary TURN credentials automatically. **Direct + relay fallback** is the default; **Relay only (test)** forces TURN and shows diagnostics. **Compatibility (TLS 443)** restricts the browser-to-relay connection to TLS on TCP port 443. The shared key authorizes room access and relay usage, not Cloudflare account administration. It stays in page memory and expires under the service's invitation policy.
 
-GitHub Pages hosts the static game. Cloudflare handles protected room setup and TURN credential issuance. Gameplay is host-authoritative WebRTC, direct where possible or relayed when selected. Rooms have two seats, expire when abandoned and are deleted once both peers connect. There are no public lobbies or individual accounts.
+GitHub Pages and Firebase Hosting serve the same static game; either link above can join the same private rooms. Cloudflare handles protected room setup and TURN credential issuance. Gameplay is host-authoritative WebRTC, direct where possible or relayed when selected. Rooms have two seats, expire when abandoned and are deleted once both peers connect. There are no public lobbies or individual accounts.
 
 Automatic lobby connection, movement and combat have passed between this workstation and a Runpod Chrome guest through TURN. Firefox, direct-path and restrictive-network acceptance remain unverified. Host migration, automatic reconnect and credential refresh are not implemented; start a fresh session before the one-hour TURN credentials expire. See [verification](specs/verification.md) for exact evidence and limits. **Manual connection (advanced)** retains the diagnostic offer/reply flow.
 
@@ -66,7 +66,7 @@ For the static browser candidate:
 python3 -m http.server 27841 --bind 127.0.0.1 --directory build/web
 ```
 
-The single-thread Compatibility export runs on ordinary HTTPS Pages hosting. Source stays on `main`; compiled playable resources and notices go to `gh-pages`. Publication uses the explicit project deployment tool and secret audit, documented in [assets and hosting](specs/assets-hosting.md).
+The single-thread Compatibility export runs on GitHub Pages and Firebase Hosting over HTTPS. Source stays on `main`; compiled playable resources and notices go to `gh-pages`. Publication uses the explicit project deployment tool and secret audit, documented in [assets and hosting](specs/assets-hosting.md).
 
 ## Integration and validation
 

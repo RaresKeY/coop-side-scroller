@@ -12,7 +12,39 @@ static uint32_t drain(EC_Handle *h, uint8_t *bytes) {
   assert(ec_v1_next_message(h, bytes, EC_MAX_MESSAGE, &n) == EC_OK);
   return n;
 }
+static void rejoin_events() {
+  auto *h = ec_v1_create(EC_ABI_V1, 1, 1);
+  auto *r = ec_v1_create(EC_ABI_V1, 2, 2);
+  uint8_t bytes[EC_MAX_MESSAGE]{};
+  auto snapshot = [&]() {
+    for (int i=0;i<3;i++) assert(ec_v1_tick(h)==EC_OK);
+    auto n=drain(h,bytes);
+    assert(ec_v1_receive(r,1,bytes,n)==EC_OK);
+  };
+  auto events = [&](int joins, int leaves, int attacks) {
+    EC_Event e{};int j=0,l=0,a=0;
+    while(ec_v1_next_event(r,&e)==EC_OK) if(e.slot==2) {
+      j+=e.type==EC_EVENT_JOIN;l+=e.type==EC_EVENT_LEAVE;a+=e.type==EC_EVENT_ATTACK;
+    }
+    assert(j==joins && l==leaves && a==attacks);
+  };
+  auto attack = [&]() {
+    assert(ec_v1_set_local_input(r,0,EC_INPUT_ATTACK)==EC_OK);
+    assert(ec_v1_tick(r)==EC_OK);
+    auto n=drain(r,bytes);
+    assert(ec_v1_receive(h,2,bytes,n)==EC_OK);
+  };
+  ec_v1_set_peer_active(h,2,1);snapshot();events(1,0,0);
+  attack();snapshot();events(0,0,1);
+  ec_v1_set_peer_active(h,2,0);snapshot();events(0,1,0);
+  ec_v1_set_peer_active(h,2,1);snapshot();events(1,0,0);
+  attack();snapshot();events(0,0,1);
+  // Joining an already attacking actor still produces its active attack cue.
+  ec_v1_reset(r,2,2);snapshot();events(1,0,1);
+  ec_v1_destroy(h);ec_v1_destroy(r);
+}
 int main() {
+  rejoin_events();
   assert(ec_v1_abi_version() == EC_ABI_V1 && ec_v1_protocol_version() == 1);
   assert(!ec_v1_create(0, 1, 1) && !ec_v1_create(EC_ABI_V1, 2, 1));
   auto *host = ec_v1_create(EC_ABI_V1, 1, 1);

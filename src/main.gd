@@ -155,7 +155,7 @@ func _ready():
  relay_setup.add_child(relay_access)
  bind_browser_entry(relay_access,"Private playtest access code",128,true)
  connection_route = OptionButton.new()
- for route_title in ["Direct + relay fallback","Relay only (test)","Direct only (no relay)"]: connection_route.add_item(route_title)
+ for route_title in ["Direct + relay fallback","Relay only (test)","Direct only (no relay)","Compatibility (TLS 443)"]: connection_route.add_item(route_title)
  relay_setup.add_child(connection_route)
  if OS.has_feature("web"):
   var advanced = CheckButton.new()
@@ -259,7 +259,7 @@ func _ready():
  multiplayer.peer_connected.connect(peer_joined)
  multiplayer.peer_disconnected.connect(peer_left)
  multiplayer.connected_to_server.connect(func(): signal_panel.hide(); status.text = "Connected • host simulates combat and movement"; connected_at = elapsed)
- multiplayer.connection_failed.connect(func(): network_ended("Connection failed · retry Private rooms" if OS.has_feature("web") else "Connection failed. Check address / UDP 27840."))
+ multiplayer.connection_failed.connect(func(): network_ended("Connection failed · retry Private rooms" if OS.has_feature("web") else "Connection failed. Check address / UDP 27840.","multiplayer_connect_failed"))
  multiplayer.server_disconnected.connect(func(): network_ended("Host disconnected • returned to solo"))
 
 func toggle_menu():
@@ -291,21 +291,25 @@ func style_button(button: Button):
   style.content_margin_bottom = 6
   button.add_theme_stylebox_override(pair[0],style)
 
-func network_ended(message: String):
+func network_ended(message: String, source := "multiplayer_disconnect"):
  if diagnostics != null:
   diagnostics.capture_ice()
   diagnostics.sample_transport()
-  diagnostics.record("failure",{"reason":"connection"})
+  var detail = diagnostics.failure_context(source)
+  detail.reason = "connection"
+  diagnostics.record("failure",detail)
   diagnostics.flush()
  solo()
  status.text = message + (" · diagnostic " + diagnostics.id if diagnostics != null and not diagnostics.id.is_empty() else "")
 
-func rtc_fail(message: String):
+func rtc_fail(message: String, source := "setup"):
  if diagnostics != null and not diagnostics.id.is_empty():
   var reason = "timeout" if "timed out" in message else "gathering" if "gather" in message else "description" if "description" in message else "candidate" if "candidate" in message else "relay" if "Relay" in message or "relay" in message else "connection" if "Connection" in message else "other"
   diagnostics.capture_ice()
   diagnostics.sample_transport()
-  diagnostics.record("failure",{"reason":reason})
+  var detail = diagnostics.failure_context(source)
+  detail.reason = reason
+  diagnostics.record("failure",detail)
   diagnostics.flush()
   message += " · diagnostic " + diagnostics.id
  var in_lobby = lobby != null and not lobby.room_id.is_empty()
@@ -383,7 +387,12 @@ func rtc_begin(server: bool, session: String = "") -> bool:
   rtc_issuing = false
   if credentials.is_empty(): return false
   configuration.iceServers = credentials.iceServers
-  configuration.iceTransportPolicy = "relay" if rtc_route_mode == 1 else "all"
+  configuration.iceTransportPolicy = "relay" if rtc_route_mode in [1,3] else "all"
+  if rtc_route_mode == 3:
+   configuration.iceServers = RelayCredentials.tls_only(credentials.iceServers)
+   if configuration.iceServers.is_empty():
+    rtc_fail("Relay service did not provide TLS 443 • choose another route")
+    return false
  rtc = WebRTCPeerConnection.new()
  var error = rtc.initialize(configuration)
  if error != OK:
@@ -511,27 +520,27 @@ func rtc_accept():
  if data.type == "answer":
   pairing_hint.text = "HOST · Connecting\nGuest reply accepted. Keep both pages open."
   pairing_paste.disabled = true
- status.text = "Connecting • relay only" if rtc_route_mode == 1 else "Connecting • direct / relay fallback" if rtc_route_mode == 0 else "Connecting directly • relay disabled"
+ status.text = "Connecting • compatibility TLS 443" if rtc_route_mode == 3 else "Connecting • relay only" if rtc_route_mode == 1 else "Connecting • direct / relay fallback" if rtc_route_mode == 0 else "Connecting directly • relay disabled"
 
 func rtc_update(now: int):
  if rtc != null and not local_signal.is_empty():
   var state = rtc.get_connection_state()
   if state == WebRTCPeerConnection.STATE_CONNECTED: rtc_connect_ms = 0
   if state in [WebRTCPeerConnection.STATE_FAILED,WebRTCPeerConnection.STATE_CLOSED]:
-   rtc_fail("Connection failed • check network and exchange fresh codes")
+   rtc_fail("Connection failed • check network and exchange fresh codes","rtc_terminal")
    return
   if state == WebRTCPeerConnection.STATE_DISCONNECTED:
    if rtc_disconnected_ms == 0: rtc_disconnected_ms = now
    if now-rtc_disconnected_ms > 10000:
-    rtc_fail("Connection lost • exchange fresh codes; automatic reconnect is deferred")
+    rtc_fail("Connection lost • exchange fresh codes; automatic reconnect is deferred","disconnect_timeout")
     return
   else: rtc_disconnected_ms = 0
   if rtc_connect_ms > 0 and state != WebRTCPeerConnection.STATE_CONNECTED and now-rtc_connect_ms > 60000:
-   rtc_fail("Connection timed out • check answer exchange and relay access")
+   rtc_fail("Connection timed out • check answer exchange and relay access","connect_timeout")
    return
   if not signal_finished:
    if now-rtc_started_ms > 30000:
-    rtc_fail("Connection gathering timed out • check browser/network and relay access")
+    rtc_fail("Connection gathering timed out • check browser/network and relay access","gather_timeout")
     return
    if rtc.get_gathering_state() == WebRTCPeerConnection.GATHERING_STATE_COMPLETE and local_signal.sdp != "":
     signal_finished = true

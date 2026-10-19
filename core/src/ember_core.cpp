@@ -315,7 +315,9 @@ int32_t ec_v1_receive(EC_Handle *h, uint32_t sender, const uint8_t *b,
       emit(h, EC_EVENT_JOIN, p.slot, 0);
     if (!p.active && previous.active)
       emit(h, EC_EVENT_LEAVE, p.slot, 0);
-    if (p.active && p.attack_id != previous.attack_id)
+    // Attack IDs belong to an actor lifetime; an idle respawn resets to zero.
+    if (p.active && ((previous.active && p.attack_id != previous.attack_id) ||
+                     (!previous.active && p.attack_ticks > 0)))
       emit(h, EC_EVENT_ATTACK, p.slot, p.attack_id);
     if (p.active && p.animation != previous.animation)
       emit(h, EC_EVENT_ANIMATION, p.slot, p.animation);

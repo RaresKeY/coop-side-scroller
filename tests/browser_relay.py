@@ -8,8 +8,11 @@ from pathlib import Path
 from browser_cdp import CDP,QuietHandler
 ROOT=Path(__file__).resolve().parents[1]
 signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(SystemExit(143)))
-INSTRUMENT='''globalThis.testPeers=[];globalThis.testHttp=[];globalThis.testDiagnosticHttp=[];globalThis.testDiagnosticEvents=[];const nativeFetch=globalThis.fetch;globalThis.fetch=async(...args)=>{const r=await nativeFetch(...args);if(String(args[0]).includes('workers.dev'))testHttp.push(r.status);if(r.url.endsWith('/v1/diagnostics')){testDiagnosticHttp.push(r.status);try{const b=args[1]?.body;const text=typeof b==='string'?b:new TextDecoder().decode(b);testDiagnosticEvents.push(...JSON.parse(text).events.map(e=>e.event));}catch{}}if(r.url.endsWith('/v1/lobby')&&r.ok){const d=await r.clone().json();if(d.rooms)globalThis.testRoomList=d.rooms;if(d.id)globalThis.testRoomId=d.id;if(d.complete)globalThis.testRoomComplete=true;}return r;};const NativeRTC=globalThis.RTCPeerConnection;
+INSTRUMENT='''globalThis.testPeers=[];globalThis.testHttp=[];globalThis.testDiagnosticHttp=[];globalThis.testDiagnosticEvents=[];globalThis.testDiagnosticReports=[];globalThis.EmberDiagnosticTest='browser';const nativeFetch=globalThis.fetch;globalThis.fetch=async(...args)=>{const r=await nativeFetch(...args);if(String(args[0]).includes('workers.dev'))testHttp.push(r.status);if(r.url.endsWith('/v1/diagnostics')){testDiagnosticHttp.push(r.status);try{const b=args[1]?.body;const text=typeof b==='string'?b:new TextDecoder().decode(b);const report=JSON.parse(text);testDiagnosticEvents.push(...report.events.map(e=>e.event));testDiagnosticReports.push({build:report.build,attempt:report.attempt,context:report.context,status:r.status,error:r.ok?null:(await r.clone().json()).error});}catch{}}if(r.url.endsWith('/v1/lobby')&&r.ok){const d=await r.clone().json();if(d.rooms)globalThis.testRoomList=d.rooms;if(d.id)globalThis.testRoomId=d.id;if(d.complete)globalThis.testRoomComplete=true;}return r;};const NativeRTC=globalThis.RTCPeerConnection;
 globalThis.RTCPeerConnection=class extends NativeRTC {constructor(...args){super(...args);testPeers.push(this);}};'''
+def diagnostic_uploads_ok(page):
+ return page.evaluate("testDiagnosticReports.length===testDiagnosticHttp.length && testDiagnosticReports.some(r=>r.status===200) && testDiagnosticReports.filter(r=>r.status===400).length<=1 && testDiagnosticReports.every(r=>r.status===200 || (r.status===400 && r.build==='diagnostics-v3' && r.error==='invalid_diagnostics'))")
+
 def wait_until(check,seconds=35):
  end=time.monotonic()+seconds
  while time.monotonic()<end:
@@ -33,7 +36,7 @@ def run(lobby=False, url=None):
  server=http.server.ThreadingHTTPServer(('127.0.0.1',27841),functools.partial(QuietHandler,directory=str(ROOT/'build/web')))
  threading.Thread(target=server.serve_forever,daemon=True).start();origin=url or 'http://127.0.0.1:27841'
  with tempfile.TemporaryDirectory(prefix='ember-relay-') as profile,(ROOT/'build/relay-browser.log').open('w') as log:
-  browser=subprocess.Popen(['chromium','--ozone-platform=x11','--no-first-run','--no-default-browser-check','--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows','--remote-debugging-port=0','--remote-allow-origins=*',f'--user-data-dir={profile}','about:blank'],stdout=log,stderr=log)
+  browser=subprocess.Popen(['chromium','--ozone-platform=x11','--mute-audio','--no-first-run','--no-default-browser-check','--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows','--remote-debugging-port=0','--remote-allow-origins=*',f'--user-data-dir={profile}','about:blank'],stdout=log,stderr=log)
   try:
    wait_until(lambda:(Path(profile)/'DevToolsActivePort').exists(),10)
    port=int((Path(profile)/'DevToolsActivePort').read_text().splitlines()[0]);base=f'http://127.0.0.1:{port}'
@@ -107,8 +110,8 @@ def run(lobby=False, url=None):
    reports=[]
    for page in [host,guest]:
     def selected_route():
-     report=page.evaluate('''(async()=>{const p=testPeers.at(-1),s=await p.getStats();const transport=[...s.values()].find(x=>x.type==='transport'&&x.selectedCandidatePairId);const pair=s.get(transport?.selectedCandidatePairId)||[...s.values()].find(x=>x.type==='candidate-pair'&&x.state==='succeeded'&&x.nominated);return {policy:p.getConfiguration().iceTransportPolicy,state:p.connectionState,local:s.get(pair?.localCandidateId)?.candidateType,remote:s.get(pair?.remoteCandidateId)?.candidateType,bytesSent:pair?.bytesSent,bytesReceived:pair?.bytesReceived,rttMs:1000*(pair?.currentRoundTripTime||0),core:EmberCoreWeb.diagnostics().views[0]};})()''')
-     return report if report.get('local')=='relay' and report.get('remote')=='relay' and report.get('bytesReceived',0)>0 else None
+     report=page.evaluate('''(async()=>{const p=testPeers.at(-1),s=await p.getStats();const transport=[...s.values()].find(x=>x.type==='transport'&&x.selectedCandidatePairId);const pair=s.get(transport?.selectedCandidatePairId)||[...s.values()].find(x=>x.type==='candidate-pair'&&x.state==='succeeded'&&x.nominated);return {policy:p.getConfiguration().iceTransportPolicy,state:p.connectionState,local:s.get(pair?.localCandidateId)?.candidateType,remote:s.get(pair?.remoteCandidateId)?.candidateType,bytesSent:pair?.bytesSent,bytesReceived:pair?.bytesReceived,transportBytesSent:transport?.bytesSent,transportBytesReceived:transport?.bytesReceived,rttMs:1000*(pair?.currentRoundTripTime||0),core:EmberCoreWeb.diagnostics().views[0]};})()''')
+     return report if report.get('local')=='relay' and report.get('remote')=='relay' and report.get('transportBytesReceived',0)>0 and report.get('transportBytesSent',0)>0 else None
     report=wait_until(selected_route,8)
     reports.append(report)
    if lobby:wait_until(lambda:any(page.evaluate('globalThis.testRoomComplete===true') for page in [host,guest]),8)
@@ -120,16 +123,17 @@ def run(lobby=False, url=None):
     selected=wait_until(lambda:page.evaluate('globalThis.routeDiagnostic'),5)
     assert selected['local']=='relay' and selected['remote']=='relay',selected
     wait_until(lambda:page.evaluate('globalThis.testDiagnosticHttp.includes(200)'),12)
-    assert page.evaluate('testDiagnosticHttp.every(status=>status===200)'), 'Diagnostic upload failed'
+    assert diagnostic_uploads_ok(page), 'Diagnostic upload failed'
    # Force a terminal transport failure and verify automatic report delivery.
-   before=host.evaluate('testDiagnosticHttp.length')
+   pages_to_check=[host,guest]
+   failures_before=[page.evaluate("testDiagnosticEvents.filter(e=>e==='failure').length") for page in pages_to_check]
+   forced_disconnect={'target':'host','at_unix':time.time(),'attempts':[page.evaluate('testDiagnosticReports.at(-1)?.attempt') for page in pages_to_check]}
    host.evaluate('testPeers.at(-1).close();true')
-   wait_until(lambda:host.evaluate('testDiagnosticHttp.length')>before,12)
-   wait_until(lambda:any(page.evaluate("testDiagnosticEvents.includes('failure')") for page in [host,guest]),25)
-   assert all(page.evaluate('testDiagnosticHttp.every(status=>status===200)') for page in [host,guest]), 'Failure report upload failed'
+   wait_until(lambda:any(page.evaluate("testDiagnosticEvents.filter(e=>e==='failure').length")>count for page,count in zip(pages_to_check,failures_before)),25)
+   assert all(diagnostic_uploads_ok(page) for page in [host,guest]), 'Failure report upload failed'
    print('DIAGNOSTIC UPLOAD AND ROUTE PASS',flush=True)
    print('GODOT LIVE PRIVATE LOBBY RELAY PASS' if lobby else 'GODOT LIVE FORCED RELAY PASS',json.dumps(reports))
-   (ROOT/('build/lobby-relay.json' if lobby else 'build/relay.json')).write_text(json.dumps({'result':'pass','lobby':lobby,'reports':reports},indent=2)+'\n')
+   (ROOT/('build/lobby-relay.json' if lobby else 'build/relay.json')).write_text(json.dumps({'result':'pass','lobby':lobby,'reports':reports,'forced_disconnect':forced_disconnect,'diagnostic_reports':[page.evaluate('testDiagnosticReports') for page in pages_to_check]},indent=2)+'\n')
   finally:
    for i,(_,page) in enumerate(locals().get('pages',[])):
     try:

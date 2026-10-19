@@ -6,7 +6,9 @@ GitHub Pages serves the game. Authenticated [private lobbies](private-lobbies.md
 
 ## Modes and lifecycle
 
-Menu selects **Direct + relay fallback** (default), **Relay only (test)** or **Direct only**. Relay modes require the private playtest key. Private room access requires that key in every route mode; direct-only advanced manual pairing can run without it using Google STUN.
+Menu selects **Direct + relay fallback** (default), **Relay only (test)**, **Direct only** or **Compatibility (TLS 443)**. Relay modes require the private playtest key. Private room access requires that key in every route mode; direct-only advanced manual pairing can run without it using Google STUN.
+
+**Compatibility (TLS 443)** uses relay-only ICE and retains only issuer-provided `turns:turn.cloudflare.com:443` URLs with absent or TCP transport. Missing TLS credentials fail setup explicitly; no UDP/direct fallback occurs. Both peers should choose this mode to route both access-network legs over TLS/TCP. The TURN relay candidate can still report `protocol: udp`; `relayProtocol: tls` identifies the browser-to-relay transport. TCP head-of-line blocking can increase gameplay latency under packet loss. This mode is a workaround to test, not evidence that a router caused an outage.
 
 Solo/reset/new attempts close the prior connection, invalidate pending HTTP work and clear inbound/outbound signaling codes. Every WebRTC description/candidate callback checks the connection generation, so an old callback cannot mutate a replacement session. Opening Menu temporarily hides unfinished setup; closing Menu restores it. Connected sessions return to gameplay. Setup panels suppress game input.
 

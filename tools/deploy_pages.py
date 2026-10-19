@@ -20,7 +20,7 @@ REPOSITORY = 'RaresKeY/coop-side-scroller'
 URL = 'https://rareskey.github.io/coop-side-scroller/'
 REF = 'refs/heads/gh-pages'
 REQUIRED = {'index.html', 'index.js', 'index.pck', 'index.wasm', 'ember_core.wasm',
-            'ember_core_bridge.js', '.nojekyll', 'THIRD_PARTY_NOTICES.txt'}
+            'ember_core_bridge.js', 'build-info.json', '.nojekyll', 'THIRD_PARTY_NOTICES.txt'}
 
 
 def git(*args, **kwargs):
@@ -56,7 +56,7 @@ def candidate_hashes():
     files = list(SITE.iterdir())
     allowed = {'.html', '.js', '.pck', '.wasm', '.png', '.txt'}
     if any(p.is_symlink() or not p.is_file() or
-           (p.name != '.nojekyll' and p.suffix not in allowed) for p in files):
+           (p.name not in {'.nojekyll', 'build-info.json'} and p.suffix not in allowed) for p in files):
         raise RuntimeError('Unexpected candidate content')
     if not REQUIRED.issubset({p.name for p in files}):
         raise RuntimeError('Incomplete candidate; run tools/build_web.sh')

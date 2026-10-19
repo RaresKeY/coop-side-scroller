@@ -16,7 +16,7 @@ Workers rate-limit bindings apply 12 requests/minute/IP and 24 authenticated req
 
 ## Browser behavior
 
-Menu selects Direct + relay fallback (default), Relay only (test), or Direct only (Google STUN; no relay issuance). Host/Join obtains fresh ICE configuration asynchronously before creating the peer. Solo/reset invalidates pending requests so stale replies cannot create a session. The simulation/C ABI does not know about HTTP, credentials, WebRTC or Cloudflare. Each page owns its own Wasm core. Signaling normally uses the authenticated [private lobby service](private-lobbies.md) in the same Worker; advanced manual pairing is retained. The lobby always requires the playtest key, including in direct-only mode. Direct-only manual pairing does not.
+Menu selects Direct + relay fallback (default), Relay only (test), Direct only (Google STUN; no relay issuance), or Compatibility (TLS 443; relay-only, TLS port 443 URLs only). Host/Join obtains fresh ICE configuration asynchronously before creating the peer. Solo/reset invalidates pending requests so stale replies cannot create a session. The simulation/C ABI does not know about HTTP, credentials, WebRTC or Cloudflare. Each page owns its own Wasm core. Signaling normally uses the authenticated [private lobby service](private-lobbies.md) in the same Worker; advanced manual pairing is retained. The lobby always requires the playtest key, including in direct-only mode. Direct-only manual pairing does not.
 
 Do not promise one-hour uninterrupted sessions: refresh/ICE restart is not implemented. Start a fresh session before credential expiry. TURN improves NAT reachability, but corporate filtering can still block all routes. Native ENet does not use TURN.
 

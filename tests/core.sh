@@ -9,3 +9,5 @@ cc -std=c11 -Wall -Wextra -Werror -I "$ROOT/core/include" "$ROOT/core/tests/c_co
 "$ROOT/build/native/standalone"
 python3 "$ROOT/tests/core_trace.py"
 deno run --no-config --allow-read="$ROOT/build" "$ROOT/tests/core_wasm.mjs"
+
+deno test --no-config --allow-read="$ROOT/adapters/web/ember_core_bridge.js,$ROOT/build/wasm/ember_core.wasm" "$ROOT/tests/web_handle_safety.test.js"

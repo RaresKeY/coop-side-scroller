@@ -23,7 +23,7 @@ The core does not own clocks, input devices, rendering, audio, assets, engine ph
 
 1. Each browser loads its own Godot engine and standalone core Wasm instance.
 2. Both players enter the private playtest key. Host creates a room; guest joins its directory entry. Every room/credential request is authorized by the service.
-3. The adapters obtain temporary ICE configuration and exchange offer/answer/candidates through the room. ICE chooses the route; the default permits direct traffic and TURN fallback. Relay-only is a diagnostic mode.
+3. The adapters obtain temporary ICE configuration and exchange offer/answer/candidates through the room. ICE chooses the route; the default permits direct traffic and TURN fallback. Relay-only is a diagnostic mode; Compatibility (TLS 443) restricts the browser-to-relay leg to TLS/TCP port 443.
 4. The host advances authority at 60 fixed ticks/second. Guest ticks emit input packets; the host emits full snapshots at 20 Hz. The replica renders accepted state without prediction or interpolation.
 5. Once both browsers report connected, the service deletes the signaling record and clients stop setup polling. Gameplay no longer depends on the directory. A selected TURN route still depends on the relay.
 6. Failed or ended sessions return to setup. Host migration, credential refresh and automatic reconnect/ICE restart are not implemented.

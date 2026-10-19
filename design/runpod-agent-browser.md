@@ -51,4 +51,14 @@ No cloud resources are created/deleted by the game harness itself. Controller co
 
 Automatic lobby Create/Join and forced-relay combat passed workstation↔Runpod Chrome against Pages `8cf749d`: ICE RTT 218–228 ms, HP 12→9 and matching final positions. The earlier manual route also passed. [Verification](../specs/verification.md#separate-network-private-lobby) owns the complete acceptance record and evidence paths.
 
-These tests do not establish Firefox compatibility, manual remote-desktop clipboard success, direct-path reachability, blocked-UDP/TLS-only operation or general NAT reliability. Disposable pod IDs and live resource status are operational state, not permanent architecture; read the current private receipt/provider state when resuming work.
+Those published-build tests do not establish Firefox compatibility, manual remote-desktop clipboard success, direct-path reachability or general NAT reliability. The later unpublished TLS-only candidate test is recorded in `specs/verification.md`; firewall-level blocked-UDP operation remains untested. Disposable pod IDs and live resource status are operational state, not permanent architecture; read the current private receipt/provider state when resuming work.
+
+## Unpublished local candidate
+
+`tests/browser_lobby_cross_network.py --local-candidate build/web --tls` loads a prepared candidate into both disposable browsers through CDP. `tests/browser_candidate.py` transfers game assets in bounded chunks; the remote transfer uses the authenticated controller. It reuses only the large hosted Godot engine Wasm after checking its SHA-256 against the local file, supplies local fetch responses and loads the local HTML/JavaScript. The bridge's script-relative core URL is made absolute for its test-only Blob script. The Pages origin is retained for the existing service allowlist, but no hosting files or backend services are changed. Reports record candidate hashes and selected relay protocol.
+
+The TLS assertion checks exclusive TLS-443 configuration and actual selected `relayProtocol: tls` on both peers, plus gameplay and production diagnostic rates. This is not a firewall-level blocked-UDP test. The remote test closes its page through the controller navigation API before explicit pod deletion.
+
+Candidate tests also verify embedded build context against `build-info.json`, mark reports `test=runpod`, capture sanitized diagnostic schema/attempt/context/status, and require accepted uploads with at most one legacy-schema rejection per page. Browser-only harnesses mark `test=browser`; old hosted builds cannot upload this new context. Candidate engine reuse is hash-checked; reports preserve exact transferred-file hashes.
+
+Relay acceptance uses whole-transport byte totals separately from the selected-pair route metadata, since incoming traffic can be accounted to another pair. The lobby harness accepts missing build context on legacy public builds; candidate builds still require matching metadata. Browser relay tests permit only one explicit v3 `invalid_diagnostics` rejection followed by successful legacy uploads.

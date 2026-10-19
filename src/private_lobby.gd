@@ -72,7 +72,7 @@ func request_data(data: Dictionary, request_generation: int) -> Dictionary:
   return {"error":"Network unavailable"}
  var response = await request.request_completed
  request.queue_free()
- if request_generation != generation: return {}
+ if request_generation != generation or (game.diagnostics != null and data.get("diagnostic", "") != game.diagnostics.id): return {}
  if response[0] != HTTPRequest.RESULT_SUCCESS:
   if game.diagnostics != null:
    game.diagnostics.record("http",{"action":str(data.get("action","unknown")),"status":-1,"code":"unknown_error"})
@@ -230,19 +230,22 @@ func sync_room():
   # A connected game no longer depends on its signaling room. The other peer
   # may already have completed cleanup; never tear gameplay down for this.
   if transport_established:
+   game.diagnostics.record("lobby_end",{"cause":"error_after_connected"})
    active = false
    panel.hide()
    return
   failures += 1
   hint.text = result.error + " · diagnostic " + game.diagnostics.id + " · retrying…"
-  if failures >= 3: game.rtc_fail("Room setup failed: " + str(result.error) + " · open Private rooms and retry")
+  if failures >= 3: game.rtc_fail("Room setup failed: " + str(result.error) + " · open Private rooms and retry","lobby_errors")
   return
  failures = 0
  if not signal_code.is_empty(): published = true
  if transport_established:
   panel.hide()
   # Continue briefly until both peers acknowledge; the server clears signals.
-  if result.get("complete",false): active = false
+  if result.get("complete",false):
+   game.diagnostics.record("lobby_end",{"cause":"complete"})
+   active = false
   return
  hint.text = "Room %s · %s" % [room_id,"connecting automatically…" if result.get("players",1)==2 else "waiting for partner…"]
  game.status.text = "Private room · automatic connection setup"

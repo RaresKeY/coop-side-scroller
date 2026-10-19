@@ -52,5 +52,20 @@ check(cmd(host,4,2,input.length)===0,'second stage begin');
 for(let i=0;i<input.length-1;i++) { cmd(host,5,i,input[i]);cmd(host,5,i,input[i]); }
 check(cmd(host,6)===-4,'incomplete stage accepted');
 check(cmd(host,6)===-4,'stage replay accepted');
+// Replica attack cues must not compare IDs across an observed actor leave.
+cmd(host,0,1,1);cmd(guest,0,2,2);
+const snapshot=()=>{for(let i=0;i<3;i++)cmd(host,2);transfer(host,guest,1);};
+const events=(join,leave,attack)=>{
+ const counts=[0,0,0];
+ while(cmd(guest,12)>0){const type=cmd(guest,12,0),slot=cmd(guest,12,1);if(slot===2&&type<=3)counts[type-1]++;cmd(guest,13);}
+ check(JSON.stringify(counts)===JSON.stringify([join,leave,attack]),'Wasm rejoin event mismatch');
+};
+const attack=()=>{cmd(guest,1,0,2);cmd(guest,2);transfer(guest,host,2);};
+cmd(host,3,2,1);snapshot();events(1,0,0);
+attack();snapshot();events(0,0,1);
+cmd(host,3,2,0);snapshot();events(0,1,0);
+cmd(host,3,2,1);snapshot();events(1,0,0);
+attack();snapshot();events(0,0,1);
+cmd(guest,0,2,2);snapshot();events(1,0,1);
 api.ec_v1_destroy(guest);api.ec_v1_destroy(host);
 console.log('Wasm ABI + native parity PASS', result);

@@ -183,13 +183,19 @@ export class PrivateLobbies {
   if(Object.keys(writes).length)await this.state.storage.put(writes);
   for(const key of stored.keys())if(!rooms[key.slice(5)])await this.state.storage.delete(key);
   if(legacy)await this.state.storage.delete('rooms');
-  if(Object.keys(rooms).length)await this.state.storage.setAlarm(now+ROOM_IDLE_MS);
-  else if((await this.state.storage.get('diagnostics'))?.length)await this.state.storage.setAlarm(Math.max(now+1000,(await this.state.storage.get('diagnostics'))[0].at+7*86400000));
+  await this.scheduleAlarm(rooms,now);
+ }
+ async scheduleAlarm(rooms,now) {
+  const deadlines=Object.values(rooms).flatMap(r=>[r.expires,r.hostSeen+ROOM_IDLE_MS,...(r.guest?[r.guestSeen+ROOM_IDLE_MS]:[])]);
+  const entries=await this.state.storage.get('diagnostics');
+  if(entries?.length)deadlines.push(entries[0].at+7*86400000);
+  if(deadlines.length)await this.state.storage.setAlarm(Math.max(now+1,Math.min(...deadlines)));
   else await this.state.storage.deleteAlarm();
  }
+
  async fetch(request) {
   // blockConcurrencyWhile also spans storage awaits: two simultaneous joins
-  // cannot both reserve the guest slot. Failed requests cannot alter the store.
+  // cannot both reserve the guest slot. Expiry cleanup also runs for rejected actions.
   return this.state.blockConcurrencyWhile(async()=>{
    let data;try{data=await readBounded(request);}catch{return Response.json({error:'invalid_request'},{status:400});}
    if(data.action==='diagnostics_read'||data.action==='diagnostics_record'){
@@ -202,7 +208,7 @@ export class PrivateLobbies {
     entries.push({...data.entry,at:Date.now()});
     while(entries.length>256||encoder.encode(JSON.stringify(entries)).length>262144)entries.shift();
     await this.state.storage.put('diagnostics',entries);
-    await this.state.storage.setAlarm(Date.now()+ROOM_IDLE_MS);
+    await this.scheduleAlarm((await this.loadRooms()).rooms,Date.now());
     return Response.json({version:1});
    }
    return this.apply(data,Date.now());
@@ -215,8 +221,9 @@ export class PrivateLobbies {
   let pruned=false;
   for(const [id,room] of Object.entries(rooms))if(now>=room.expires||now-room.hostSeen>=ROOM_IDLE_MS||(room.guest && now-room.guestSeen>=ROOM_IDLE_MS)){await this.cleanupEvent(id,now>=room.expires?'lifetime':now-room.hostSeen>=ROOM_IDLE_MS?'host_lease':'guest_lease');delete rooms[id];pruned=true;}
   const save=()=>this.saveRooms(rooms,stored,legacy,now);
+  if(pruned)await save();
   if(data.action==='list') {
-   if(pruned||legacy)await save();
+   if(legacy&&!pruned)await save();
    return Response.json({version:1,rooms:Object.entries(rooms).filter(([,r])=>!r.guest).map(([id,r])=>({id,name:r.name,players:1,capacity:2,protocol:1}))});
   }
   if(typeof data.seat!=='string'||!SEAT.test(data.seat))return reply(400,'invalid_seat');
@@ -271,13 +278,22 @@ export class PrivateLobbies {
 }
 
 export function diagnosticReport(value) {
- if(!value || value.version!==1 || !['diagnostics-v1','diagnostics-v2'].includes(value.build) || !/^[a-f0-9]{16}$/.test(value.attempt) || !Array.isArray(value.events) || !value.events.length || value.events.length>64)return null;
- if(Object.keys(value).some(k=>!['version','build','attempt','events'].includes(k)))return null;
+ if(!value || value.version!==1 || !['diagnostics-v1','diagnostics-v2','diagnostics-v3'].includes(value.build) || typeof value.attempt!=='string' || !/^[a-f0-9]{16}$/.test(value.attempt) || !Array.isArray(value.events) || !value.events.length || value.events.length>64)return null;
+ if(Object.keys(value).some(k=>!['version','build','attempt','events',...(value.build==='diagnostics-v3'?['context']:[])].includes(k)))return null;
+ const v3=value.build==='diagnostics-v3';
+ if(v3){
+  const c=value.context;
+  if(!c||typeof c!=='object'||Array.isArray(c)||Object.keys(c).sort().join(',')!=='built,commit,dirty,payload,site,test')return null;
+  if(typeof c.commit!=='string'||typeof c.payload!=='string'||!/^(?:[a-f0-9]{40}|unknown)$/.test(c.commit)||!/^(?:[a-f0-9]{64}|unknown)$/.test(c.payload)||typeof c.dirty!=='boolean')return null;
+  if(typeof c.built!=='string'||!(c.built==='unknown'||/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(c.built)))return null;
+  if(!['firebase','pages','local','other'].includes(c.site)||!['none','runpod','browser'].includes(c.test))return null;
+ }
  const actions=['ice','list','create','join','sync','leave','unknown'];
  const codes=["access_denied","origin_denied","rate_limited","limiter_unavailable","issuer_not_configured","lobby_not_configured","lobby_unavailable","invalid_lobby_request","relay_provider_failed",'ok','unknown_error','room_expired','room_full','own_room','signal_already_set','session_mismatch','seat_denied','invitation_expired','invalid_request','invalid_seat','invalid_room','invalid_name','invalid_signal','invalid_ready','rooms_full'];
  const shapes={ice_candidates:['host','srflx','prflx','relay'],ice_stats_unavailable:[],ice_state:['gathering','ice'],ice_error:['server','code'],ice_stats:['host','srflx','prflx','relay','pairs','failed','checking','succeeded','requests','responses'],transport:['local','remote','protocol','rtt'],begin:[],leave:[],failure:['reason'],rtc:['state'],visibility:['visible'],summary:['rtt','rx','tx','gaps','actors'],http:['action','status','code'],room:['room'],rtc_begin:['route']};
+ if(v3){shapes.lobby_end=['cause'];shapes.failure.push('source','state','established');shapes.network=['online'];shapes.transport.push('relayProtocol','relayPort',...['bytesSent','bytesReceived','packetsSent','packetsReceived'].flatMap(k=>[k,k+'PerSecond','transport'+k[0].toUpperCase()+k.slice(1),'transport'+k[0].toUpperCase()+k.slice(1)+'PerSecond']));}
  for(const event of value.events) {
-  if(!event || !(event.event in shapes) || !['solo','host','client'].includes(event.role) || !Number.isInteger(event.ms) || event.ms<0 || event.ms>86400000)return null;
+  if(!event || typeof event!=='object' || Array.isArray(event) || typeof event.event!=='string' || !Object.hasOwn(shapes,event.event) || !['solo','host','client'].includes(event.role) || !Number.isInteger(event.ms) || event.ms<0 || event.ms>86400000)return null;
   if(Object.keys(event).some(k=>!['seq','event','ms','role',...shapes[event.event]].includes(k)))return null;
   for(const [key,v] of Object.entries(event)) {
    if(['event','ms','role'].includes(key))continue;
@@ -287,6 +303,12 @@ export function diagnosticReport(value) {
    else if(key==='code'&&event.event==='ice_error'){if(!Number.isInteger(v)||v<0||v>65535)return null;}
    else if(key==='local'||key==='remote'){if(!['host','srflx','prflx','relay','unknown'].includes(v))return null;}
    else if(key==='protocol'){if(!['udp','tcp','unknown'].includes(v))return null;}
+   else if(key==='relayProtocol'){if(!['udp','tcp','tls','unknown'].includes(v))return null;}
+   else if(key==='relayPort'){if(![0,443].includes(v))return null;}
+   else if(key==='source'){if(!['setup','multiplayer_disconnect','multiplayer_connect_failed','rtc_terminal','disconnect_timeout','connect_timeout','gather_timeout','lobby_errors'].includes(v))return null;}
+   else if(key==='cause'){if(!['complete','error_after_connected'].includes(v))return null;}
+   else if(key==='established'){if(typeof v!=='boolean')return null;}
+   else if(key==='online'){if(typeof v!=='boolean')return null;}
    else if(key==='reason'){if(!['timeout','gathering','description','candidate','relay','connection','other'].includes(v))return null;}
    else if(key==='visible'){if(typeof v!=='boolean')return null;}
    else if(key==='room'){if(typeof v!=='string'||!/^[A-F0-9]{8}$/.test(v))return null;}
@@ -295,5 +317,5 @@ export function diagnosticReport(value) {
    else if(!Number.isInteger(v)||v< -1||v>2147483647)return null;
   }
  }
- return {version:1,build:value.build,attempt:value.attempt,events:value.events};
+ return {version:1,build:value.build,attempt:value.attempt,events:value.events,...(v3?{context:value.context}:{})};
 }

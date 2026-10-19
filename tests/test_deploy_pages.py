@@ -50,6 +50,15 @@ class DeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Unexpected'):
                 deploy.candidate_hashes()
 
+    def test_candidate_allows_build_manifest_but_not_arbitrary_json(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'SITE', Path(tmp)):
+            for name in deploy.REQUIRED:
+                (Path(tmp) / name).write_text('candidate')
+            self.assertIn('build-info.json', deploy.candidate_hashes())
+            (Path(tmp) / 'credentials.json').write_text('{}')
+            with self.assertRaisesRegex(RuntimeError, 'Unexpected'):
+                deploy.candidate_hashes()
+
     def test_publication_lock_excludes_second_owner(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'common_dir', return_value=Path(tmp)):
             with deploy.publication_lock():
