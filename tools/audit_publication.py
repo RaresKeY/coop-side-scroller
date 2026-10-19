@@ -20,6 +20,7 @@ def collect(value):
 for path in Path('/config').glob('*.json'): collect(json.loads(path.read_text()))
 if Path('/runpod-config.toml').is_file(): collect(tomllib.loads(Path('/runpod-config.toml').read_text()))
 for path in Path('/test-config').glob('*.json'): collect(json.loads(path.read_text()))
+for path in Path('/browser-config').glob('*.json'): collect(json.loads(path.read_text()))
 secrets.update(base64.b64encode(value) for value in list(secrets))
 if not secrets: raise SystemExit('No private comparison values found; refusing an incomplete audit.')
 patterns=[rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\r\n]+[A-Za-z0-9+/=\r\n]{64,}-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',rb'github_pat_[A-Za-z0-9_]{40,}',rb'gh[pousr]_[A-Za-z0-9]{30,}',rb'AKIA[A-Z0-9]{16}',rb'AIza[A-Za-z0-9_-]{35}']
@@ -36,7 +37,7 @@ def main():
  if config.is_symlink() or config.stat().st_mode&0o077: raise SystemExit('Private config permissions invalid.')
  receipt=json.loads((ROOT.parent/'tooling/cloudflare-api/.local/image.json').read_text())
  command=['podman','run','--rm','--pull=never','--network=none','--read-only','--cap-drop=all','--security-opt=no-new-privileges','--pids-limit=32','--memory=128m','--userns=keep-id','--user',f'{os.getuid()}:{os.getgid()}','--label','io.rareskey.project=coop-side-scroller','--label','io.rareskey.purpose=publication-audit','--volume',f'{config}:/config:ro,Z','--interactive','--entrypoint','python',receipt['image_id'],'-c',AUDITOR]
- for source,target in [(Path.home()/'.runpod/config.toml','/runpod-config.toml'),(Path.home()/'.config/ember-coop-testing','/test-config')]:
+ for source,target in [(Path.home()/'.runpod/config.toml','/runpod-config.toml'),(Path.home()/'.config/ember-coop-testing','/test-config'),(Path.home()/'.config/runpod-browser','/browser-config')]:
   if source.exists():command[command.index('--entrypoint'):command.index('--entrypoint')]=['--volume',f'{source}:{target}:ro,Z']
  process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
  def send(stream,size,label):
@@ -61,11 +62,12 @@ def main():
    if relative.startswith('assets/private/'): raise RuntimeError('Private artwork in source candidates')
    if path.is_file():
     with path.open('rb') as stream: send(stream,path.stat().st_size,'source:'+relative)
-  for path in sorted((ROOT/'build/web').glob('*')):
+  web_paths=sorted((ROOT/'build/web').glob('*'))
+  for path in web_paths:
    if path.is_file():
     with path.open('rb') as stream: send(stream,path.stat().st_size,'web:'+path.name)
   process.stdin.close();report=process.stdout.read();status=process.wait()
-  print(report.strip());print(json.dumps({'git_objects':len(blobs),'source_files':len(paths),'web_export_checked':True}))
+  print(report.strip());print(json.dumps({'git_objects':len(blobs),'source_files':len(paths),'web_export_checked':bool(web_paths)}))
   return status
  finally:
   if process.poll() is None: process.terminate();process.wait(timeout=5)

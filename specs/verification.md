@@ -27,10 +27,20 @@ Browser clipboard fallback: `tests/web.sh --clipboard-check` forces asynchronous
 
 ### Guided pairing UI review (2026-10-19)
 
-VERDICT: NEEDS CHANGES for end-to-end separate-network acceptance; local guided UI checks pass.
+VERDICT: APPROVE for the inspected desktop guided UI and two-network Chrome relay path. Firefox and the broader network matrix remain unverified.
 
 Scope: Godot browser Host/Join, native DOM code entry and clipboard-denial fallback. The old screenshot showed simultaneous generic offer/accept/copy/paste controls and two large unlabeled code fields. The replacement uses role-specific steps, hidden raw fields, a focused native paste dialog and an explicit retry panel. Wrong-role codes reject before SDP application. Core/native lab/animation contracts are preserved.
 
 Verification: headless `res://tests/connection_codes.gd` passes; `tests/web.sh --clipboard-check` passes actual trusted copy, native DOM text entry, focus, cancellation and cleanup at 1920×1080, 1280×720, 960×540 and 854×480. `tests/browser_relay.py` passes two actual independent Godot Web cores through relay/relay candidates, movement and replicated HP 12→11, with candidate RTT 147–157 ms in this run. Host pairing captures were taken at all four sizes; smallest/largest Host and smallest native paste/copy dialogs were visually inspected. The first updated combat harness stopped just outside attack range; its approach threshold was corrected and the complete test then passed.
 
-Unverified: the new flow in Runpod Firefox, separate-network pairing, mobile and controller input. Runpod was stopped at the user's request. Manual signaling still allows ICE failure while waiting for the reply, so this UI change is not a proven cure for the reported connection failure. Short-code automatic signaling remains deferred.
+Unverified: the new flow in Runpod Firefox, mobile and controller input. The manual Firefox desktop was stopped at the user's request. Manual signaling still allows ICE failure while waiting for the reply; the automated two-network Chrome result below bypasses desktop clipboard transfer and does not prove Firefox copying. Short-code automatic signaling remains deferred.
+
+### Separate-network relay acceptance (2026-10-19)
+
+`tests/browser_cross_network.py` passed against the public GitHub Pages build, using a hardware-rendered Chromium host on this workstation and the dedicated Chrome 141.0.7390.54 controller guest on Runpod. Each ran its own Wasm core. Both selected candidate types were relay/relay under relay-only policy, with bidirectional bytes and ICE pair RTT 161 ms (host) / 179 ms (guest). Guest movement replicated; guest attacks reduced HP 12→10 on both; subsequent host movement replicated back to the guest. Final sampled player positions matched: host x=230994, guest x=699115 milli-pixels. Different sampled ticks reflect asynchronous observation, not a lockstep claim.
+
+The harness drives actual Host/Join and native DOM code entry. It captures the Copy action's outgoing code in memory through a test-only clipboard wrapper, then enters the partner's code via CDP. It does not deploy signaling, use a remote desktop clipboard, or verify human clipboard transfer. Codes, candidate addresses, TURN credentials and controller tokens are never printed or written into evidence. The controller itself remains in the separate tooling project; cloud resource lifecycle is explicit outside the harness.
+
+Sanitized report `build/cross-network.json` and full-scene `build/cross-network-host.png` / `build/cross-network-guest.png` are retained as ignored evidence. Both captures were visually inspected: two independently positioned actors, matching dummy HP 10 and live RTT/snapshot HUD. The remote renderer is intentional CPU Mesa/ANGLE; it is not GPU or Firefox evidence. Three controller authentication/method tests also pass. Initial harness attempts exposed Godot text-input and letterbox-coordinate assumptions; after switching the masked field to key events and aspect-fit coordinate mapping, the complete test passed.
+
+Remaining acceptance: Firefox, direct-path routes, blocked UDP with TURN TCP/TLS-only, expired/revoked invitations, reconnect/ICE restart, reload/rejoin, host exit and network changes. One successful workstation↔Runpod relay session does not guarantee every NAT/firewall/browser combination.

@@ -13,6 +13,8 @@ Portable C++ co-op core with a versioned C ABI, native/Wasm builds, a Godot refe
 | [TURN service](turn-service.md) | `server/turn/`, `src/relay_credentials.gd`, browser setup | Changing invitation protection, credential issuance, relay configuration or deployment |
 | [Network lab](network-lab.md) | `play-labs.sh`, `labs/`, `src/lab_keys.gd`, `tests/lab.sh` | Changing interactive tests, keyboard routing, latency/debug or process ownership |
 | [Assets and hosting](assets-hosting.md) | `tools/`, `assets/craftpix-manifest.json`, `export_presets.cfg`, `.gitignore` | Importing art or building/publishing |
-| [Verification](verification.md) | `tests/`, Web export and browser/manual checks | Assessing what is actually proven |
+| [Verification](verification.md) | `tests/` including `browser_cross_network.py`, Web export and browser/manual checks | Assessing what is actually proven |
 
 The conventional NAT/TURN/certificate study is in `design/internet-connectivity.md`. Provider alternatives are in `design/network-options.md`; deferred work is in `BACKLOG.md`.
+
+Separate disposable controller setup and the cross-network harness are documented in [Runpod agent browser](../design/runpod-agent-browser.md).
