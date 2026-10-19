@@ -119,6 +119,28 @@ function signalEnvelope(code,role) {
 }
 export class PrivateLobbies {
  constructor(state) {this.state=state;}
+ async loadRooms() {
+  // Compatibility with the initial single-value prototype; existing sessions
+  // survive the first upgrade. Per-room values stay below SQLite's 2 MB cap.
+  const legacy=await this.state.storage.get('rooms');
+  const stored=await this.state.storage.list({prefix:'room:',limit:ROOM_LIMIT+1});
+  if(stored.size>ROOM_LIMIT)throw new Error('Directory capacity exceeded');
+  const rooms={...(legacy||{})};
+  for(const [key,room] of stored)rooms[key.slice(5)]=structuredClone(room);
+  return {rooms,stored,legacy:!!legacy};
+ }
+ async saveRooms(rooms,stored,legacy,now) {
+  const writes={};
+  for(const [id,room] of Object.entries(rooms)) {
+   const key='room:'+id;
+   if(JSON.stringify(stored.get(key))!==JSON.stringify(room))writes[key]=room;
+  }
+  if(Object.keys(writes).length)await this.state.storage.put(writes);
+  for(const key of stored.keys())if(!rooms[key.slice(5)])await this.state.storage.delete(key);
+  if(legacy)await this.state.storage.delete('rooms');
+  if(Object.keys(rooms).length)await this.state.storage.setAlarm(now+ROOM_IDLE_MS);
+  else await this.state.storage.deleteAlarm();
+ }
  async fetch(request) {
   // blockConcurrencyWhile also spans storage awaits: two simultaneous joins
   // cannot both reserve the guest slot. Failed requests cannot alter the store.
@@ -130,15 +152,12 @@ export class PrivateLobbies {
  async apply(data,now) {
   const reply=(status,error)=>Response.json({error},{status});
   if(!data || typeof data!=='object'||Array.isArray(data)||data.version!==1||!['list','create','join','sync','leave'].includes(data.action))return reply(400,'invalid_request');
-  const rooms=await this.state.storage.get('rooms')||{};
+  const {rooms,stored,legacy}=await this.loadRooms();
   let pruned=false;
   for(const [id,room] of Object.entries(rooms))if(now>=room.expires||now-room.hostSeen>=ROOM_IDLE_MS||(room.guest && now-room.guestSeen>=ROOM_IDLE_MS)){delete rooms[id];pruned=true;}
-  const save=async()=>{
-   if(Object.keys(rooms).length){await this.state.storage.put('rooms',rooms);await this.state.storage.setAlarm(now+ROOM_IDLE_MS);}
-   else {await this.state.storage.delete('rooms');await this.state.storage.deleteAlarm();}
-  };
+  const save=()=>this.saveRooms(rooms,stored,legacy,now);
   if(data.action==='list') {
-   if(pruned)await save();
+   if(pruned||legacy)await save();
    return Response.json({version:1,rooms:Object.entries(rooms).filter(([,r])=>!r.guest).map(([id,r])=>({id,name:r.name,players:1,capacity:2,protocol:1}))});
   }
   if(typeof data.seat!=='string'||!SEAT.test(data.seat))return reply(400,'invalid_seat');
@@ -182,10 +201,10 @@ export class PrivateLobbies {
  }
  async alarm() {
   await this.state.blockConcurrencyWhile(async()=>{
-   const now=Date.now(),rooms=await this.state.storage.get('rooms')||{};
+   const now=Date.now();
+   const {rooms,stored,legacy}=await this.loadRooms();
    for(const [id,r] of Object.entries(rooms))if(now>=r.expires||now-r.hostSeen>=ROOM_IDLE_MS||(r.guest&&now-r.guestSeen>=ROOM_IDLE_MS))delete rooms[id];
-   if(Object.keys(rooms).length){await this.state.storage.put('rooms',rooms);await this.state.storage.setAlarm(now+ROOM_IDLE_MS);}
-   else {await this.state.storage.delete('rooms');await this.state.storage.deleteAlarm();}
+   await this.saveRooms(rooms,stored,legacy,now);
   });
  }
 }
