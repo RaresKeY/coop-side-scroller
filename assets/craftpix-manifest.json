@@ -1,0 +1,65 @@
+{
+  "source": "CraftPix",
+  "license": "https://craftpix.net/file-licenses/",
+  "character_product": "https://craftpix.net/product/prototype-saber-fighter-pixel-sprite-sheet/",
+  "character_archive_sha256": "916dd70f68500c04380356dfcce61ada8a81e334d626960f96b2b83221d4889d",
+  "ui_archive_sha256": "8b670da644f1aa056e7e374e876eb100b7b284a2d3bdcbb129f43fe16dcefe71",
+  "operations": "Unchanged PNG copies; runtime AtlasTexture regions; no exported artwork tools.",
+  "files": [
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Animations/Idle.png",
+      "target": "assets/private/character/Idle.png",
+      "sha256": "9861e70ea2e27b07c8a202d9aff3839943b7019a287c55e6c5abcffb95a5a517"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Animations/Walk.png",
+      "target": "assets/private/character/Walk.png",
+      "sha256": "096689367b772ef6de51f31f7c263d07bee63dabc2e8d0f9a95bea607b6ac937"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Animations/Run.png",
+      "target": "assets/private/character/Run.png",
+      "sha256": "44e5bed5ea39a0f90f95633269b645dc1d81f01ce3e7f61b9bbe099711dba235"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Animations/Jump.png",
+      "target": "assets/private/character/Jump.png",
+      "sha256": "ee508798e80c61d5f98ffff9a7cc3ab6f022a5b2e41934cee8c62e7534d545b7"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Animations/Attack 1.png",
+      "target": "assets/private/character/Attack 1.png",
+      "sha256": "c59888bf41551ec7bf718f298b6d3970f3d8d75e8bcead18edb3d470720275db"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Animations/Hurt.png",
+      "target": "assets/private/character/Hurt.png",
+      "sha256": "f12070c60755991a452a2ae144173d95bb74127f342727ba7b094d42aa53f92f"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Animations/Dead.png",
+      "target": "assets/private/character/Dead.png",
+      "sha256": "9514f48c3a86caf8ff325fbe6675d37183c29d625b0d16b53460e6506287fd93"
+    },
+    {
+      "source": "packs/rpg-game-ui/source/Sliced Images/Part_1/Top Game Bar/tgb_menu_button.png",
+      "target": "assets/private/ui/button.png",
+      "sha256": "53fc399002a4dc48e2c3827299dbf41e301c813e0bf521c98b33b1b366682413"
+    },
+    {
+      "source": "packs/rpg-game-ui/source/Sliced Images/Part_1/Top Game Bar/tgb_menu_button-HOVER.png",
+      "target": "assets/private/ui/button-HOVER.png",
+      "sha256": "16a73d9cda3bbcd6f0a9c9168238e8516db7911dfc1377eab41c991eac6b1367"
+    },
+    {
+      "source": "packs/rpg-game-ui/source/Sliced Images/Part_1/Top Game Bar/tgb_menu_button-PUSHED.png",
+      "target": "assets/private/ui/button-PUSHED.png",
+      "sha256": "7e3184cdeaaacd24932fdddef798f58b55e183c0a799ff01f8e70f4b04619e63"
+    },
+    {
+      "source": "collections/Prototype Characters/assets/craftpix-net-949015-prototype-saber-fighter-pixel-sprite-sheet/Licens.txt",
+      "target": "assets/private/character/Licens.txt",
+      "sha256": "0c0f673571adbb935c734ac17fbc6e51fb4368a225b915aa25031712b03960d4"
+    }
+  ]
+}
