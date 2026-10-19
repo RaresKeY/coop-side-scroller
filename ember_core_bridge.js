@@ -1,32 +1,72 @@
 // Dependency-free, classic-script boot for the Godot Web reference adapter.
 // Core readiness is awaited before starting Godot; failures reach its loading notice.
 (() => {
-  // Retain only the latest engine peer; expose selected route metadata, never SDP/IPs.
-  let diagnosticPeer = null;
+  // Bounded ICE metadata for successful and failed attempts. No addresses/SDP/URLs.
+  let diagnosticPeer = null, diagnosticEvents = [];
+  const bounded = n => Number.isFinite(n) ? Math.min(2147483647, Math.max(0, Math.round(n))) : 0;
+  const candidateType = value => ['host','srflx','prflx','relay'].includes(value) ? value : 'unknown';
+  const protocol = value => ['udp','tcp'].includes(value) ? value : 'unknown';
+  const enqueue = (peer, event) => {
+    if (peer !== diagnosticPeer) return;
+    diagnosticEvents.push(event);
+    if (diagnosticEvents.length > 64) diagnosticEvents.shift();
+  };
+  const stateEvent = peer => ({event:'ice_state',
+    gathering:['new','gathering','complete'].includes(peer.iceGatheringState)?peer.iceGatheringState:'unknown',
+    ice:['new','checking','connected','completed','disconnected','failed','closed'].includes(peer.iceConnectionState)?peer.iceConnectionState:'unknown'});
   const BrowserRTC = globalThis.RTCPeerConnection;
   if (BrowserRTC) globalThis.RTCPeerConnection = class extends BrowserRTC {
     constructor(...args) {
       super(...args);
       diagnosticPeer = this;
-      this.addEventListener('connectionstatechange', () => {
-        if (this.connectionState === 'closed' && diagnosticPeer === this) diagnosticPeer = null;
+      diagnosticEvents = [];
+      enqueue(this,stateEvent(this));
+      const candidates={host:0,srflx:0,prflx:0,relay:0};
+      this.addEventListener('icecandidate',event=>{
+        if(this!==diagnosticPeer)return;
+        const type=candidateType(event.candidate?.type);
+        if(type!=='unknown')candidates[type]=bounded(candidates[type]+1);
+        enqueue(this,{event:'ice_candidates',...candidates});
+      });
+      for (const name of ['icegatheringstatechange','iceconnectionstatechange'])
+        this.addEventListener(name,()=>enqueue(this,stateEvent(this)));
+      this.addEventListener('icecandidateerror',event=>{
+        // Keep only the scheme; URL, errorText, address and port may contain private data.
+        const scheme = /^(stun|turn|turns):/.exec(typeof event.url==='string'?event.url:'')?.[1] || 'unknown';
+        enqueue(this,{event:'ice_error',server:scheme,code:Math.min(65535,bounded(event.errorCode))});
       });
     }
   };
   globalThis.EmberConnectionDiagnostics = Object.freeze({
+    reset: () => { diagnosticPeer = null; diagnosticEvents = []; },
+    drain: () => { const events=diagnosticEvents;diagnosticEvents=[];return JSON.stringify(events); },
     sample: async finish => {
+      const peer=diagnosticPeer;
+      if (!peer) return;
       try {
-        const peer = diagnosticPeer;
-        if (!peer || peer.connectionState !== 'connected') return;
-        const stats = await peer.getStats();
-        if (peer !== diagnosticPeer) return;
-        const transport = [...stats.values()].find(x => x.type === 'transport' && x.selectedCandidatePairId);
-        const pair = stats.get(transport?.selectedCandidatePairId);
+        const stats=await peer.getStats();
+        if (peer!==diagnosticPeer) return;
+        const summary={event:'ice_stats',host:0,srflx:0,prflx:0,relay:0,pairs:0,failed:0,checking:0,succeeded:0,requests:0,responses:0};
+        for (const stat of stats.values()) {
+          if (stat.type==='local-candidate' && candidateType(stat.candidateType)!=='unknown') summary[stat.candidateType]++;
+          if (stat.type==='candidate-pair') {
+            summary.pairs++;
+            if (stat.state==='failed') summary.failed++;
+            if (['waiting','in-progress','frozen'].includes(stat.state)) summary.checking++;
+            if (stat.state==='succeeded') summary.succeeded++;
+            summary.requests=bounded(summary.requests+bounded(stat.requestsSent));
+            summary.responses=bounded(summary.responses+bounded(stat.responsesReceived));
+          }
+        }
+        enqueue(peer,summary);
+        const transport=[...stats.values()].find(x=>x.type==='transport'&&x.selectedCandidatePairId);
+        const pair=stats.get(transport?.selectedCandidatePairId);
         if (!pair) return;
-        const local = stats.get(pair.localCandidateId), remote = stats.get(pair.remoteCandidateId);
-        const type = value => ['host', 'srflx', 'prflx', 'relay'].includes(value) ? value : 'unknown';
-        finish(JSON.stringify({local:type(local?.candidateType),remote:type(remote?.candidateType),protocol:['udp','tcp'].includes(local?.protocol)?local.protocol:'unknown',rtt:Math.min(2147483647,Math.max(0,Math.round((pair.currentRoundTripTime || 0)*1000)))}));
-      } catch { /* Diagnostics must never interrupt play. */ }
+        const local=stats.get(pair.localCandidateId),remote=stats.get(pair.remoteCandidateId);
+        finish(JSON.stringify({local:candidateType(local?.candidateType),remote:candidateType(remote?.candidateType),protocol:protocol(local?.protocol),rtt:bounded((pair.currentRoundTripTime||0)*1000)}));
+      } catch {
+        enqueue(peer,{event:'ice_stats_unavailable'});
+      }
     },
   });
   const wasmURL = new URL('ember_core.wasm', document.currentScript.src);
