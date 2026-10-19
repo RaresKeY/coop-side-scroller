@@ -63,6 +63,7 @@ var setup_menu: PanelContainer
 var requested_address := "127.0.0.1"
 var capture_at := -1.0
 var test_mode := ""
+var lobby
 var camera: Camera2D
 var test_partner_seen := false
 
@@ -102,7 +103,7 @@ func _ready():
  panel.add_child(title)
  var menu_button = Button.new()
  menu_button.text = "Menu"
- menu_button.pressed.connect(func(): setup_menu.visible = not setup_menu.visible; signal_panel.hide())
+ menu_button.pressed.connect(toggle_menu)
  menu_button.custom_minimum_size = Vector2(88,30)
  panel.add_child(menu_button)
  status = Label.new()
@@ -120,7 +121,9 @@ func _ready():
  var heading = Label.new()
  heading.text = "Play"
  options.add_child(heading)
- for item in [["Play solo",solo],["Host game",host],["Join game",join_game]]:
+ var manual_options: VBoxContainer
+ var items = [["Play solo",solo]] if OS.has_feature("web") else [["Play solo",solo],["Host game",host],["Join game",join_game]]
+ for item in items:
   var b = Button.new()
   b.text = item[0]
   b.pressed.connect(item[1])
@@ -131,8 +134,14 @@ func _ready():
  address.placeholder_text = "Host address"
  options.add_child(address)
  address.visible = not OS.has_feature("web")
+ if OS.has_feature("web"):
+  var rooms_button = Button.new()
+  rooms_button.text = "Private rooms"
+  style_button(rooms_button)
+  rooms_button.pressed.connect(func(): lobby.open())
+  options.add_child(rooms_button)
  var hint = Label.new()
- hint.text = "Host creates a session. Join connects to your partner."
+ hint.text = "Enter your playtest key once, then open Private rooms." if OS.has_feature("web") else "Host creates a session. Join connects to your partner."
  hint.add_theme_font_size_override("font_size",13)
  options.add_child(hint)
  var relay_setup = VBoxContainer.new()
@@ -145,6 +154,19 @@ func _ready():
  connection_route = OptionButton.new()
  for route_title in ["Direct + relay fallback","Relay only (test)","Direct only (no relay)"]: connection_route.add_item(route_title)
  relay_setup.add_child(connection_route)
+ if OS.has_feature("web"):
+  var advanced = CheckButton.new()
+  advanced.text = "Manual connection (advanced)"
+  relay_setup.add_child(advanced)
+  manual_options = VBoxContainer.new()
+  relay_setup.add_child(manual_options)
+  manual_options.hide()
+  advanced.toggled.connect(func(enabled): manual_options.visible = enabled)
+  for item in [["Host game",host],["Join game",join_game]]:
+   var button = Button.new()
+   button.text = item[0]
+   button.pressed.connect(item[1])
+   manual_options.add_child(button)
  if lab_role != "":
   menu_button.hide()
   help.text = "A/D move · W jump · F attack" if lab_role == "host" else "Left/Right move · Up jump · L attack"
@@ -199,6 +221,9 @@ func _ready():
  # DOM text field so nested remote desktops need no Clipboard API permission.
  signal_out.visible = false
  signal_in.visible = false
+ lobby = preload("res://src/private_lobby.gd").new()
+ add_child(lobby)
+ lobby.setup(self,canvas)
  solo()
  setup_menu.visible = lab_role == ""
  if lab_role != "":
@@ -226,6 +251,16 @@ func _ready():
  multiplayer.connection_failed.connect(func(): solo(); status.text = "Connection failed. Check address / UDP 27840.")
  multiplayer.server_disconnected.connect(func(): solo(); status.text = "Host disconnected • returned to solo")
 
+func toggle_menu():
+ if setup_menu.visible:
+  setup_menu.hide()
+  if lobby != null and lobby.active: lobby.panel.show(); return
+  if pairing_role != "" and (rtc == null or rtc.get_connection_state() != WebRTCPeerConnection.STATE_CONNECTED): signal_panel.show()
+ else:
+  setup_menu.show()
+  if lobby != null: lobby.panel.hide()
+  signal_panel.hide()
+
 func build_animations():
  animations = CharacterView.make_frames()
 
@@ -246,14 +281,17 @@ func style_button(button: Button):
   button.add_theme_stylebox_override(pair[0],style)
 
 func rtc_fail(message: String):
- var role = pairing_role
+ var in_lobby = lobby != null and not lobby.room_id.is_empty()
+ var role = "" if in_lobby else pairing_role
+ if in_lobby:
+  message = message.replace("exchange fresh codes","open Private rooms and retry").replace("check answer exchange and relay access","check network and relay access")
  solo()
  if OS.has_feature("web") and role != "":
   pairing_role = role
   signal_panel.show()
   pairing_copy.disabled = true
   pairing_paste.disabled = true
-  pairing_hint.text = "Could not connect. Start again and exchange fresh codes.\nBoth players must finish: host invitation → guest reply → host accepts reply."
+  pairing_hint.text = "Could not connect. Start again and exchange fresh codes.\nBoth players must finish: host invitation > guest reply > host accepts reply."
  else: setup_menu.show()
  status.text = message
 
@@ -333,17 +371,25 @@ func rtc_begin(server: bool, session: String = "") -> bool:
  connected_at = elapsed
  rtc_started_ms = Time.get_ticks_msec()
  local_signal = {"game":"ember-coop","version":ConnectionCodes.VERSION,"protocol":ConnectionCodes.PROTOCOL,"session":Crypto.new().generate_random_bytes(16).hex_encode() if server else session,"type":"","sdp":"","ice":[]}
+ bind_rtc_callbacks(generation)
+ status.text = "Gathering connection details…"
+ return true
+
+func bind_rtc_callbacks(generation: int):
  rtc.session_description_created.connect(func(type, sdp):
+  if generation != connection_generation or rtc == null: return
   var description_error = rtc.set_local_description(type,sdp)
+  if generation != connection_generation or rtc == null: return
   if description_error != OK:
    rtc_fail("Local session description failed: " + error_string(description_error))
    return
   local_signal.type = type
   local_signal.sdp = sdp
  )
- rtc.ice_candidate_created.connect(func(media, index, candidate): local_signal.ice.append([media,index,candidate]))
- status.text = "Gathering connection code…"
- return true
+ rtc.ice_candidate_created.connect(func(media, index, candidate):
+  if generation != connection_generation or rtc == null: return
+  local_signal.ice.append([media,index,candidate])
+ )
 
 func paste_signal():
  if OS.has_feature("web"):
@@ -446,17 +492,17 @@ func rtc_update(now: int):
      return
     var code = ConnectionCodes.encode(local_signal)
     if code.length() > ConnectionCodes.MAX_CODE:
-     rtc_fail("Connection code too large • automatic signaling is deferred")
+     rtc_fail("Connection details exceed prototype size limits")
      return
     if ConnectionCodes.decode(code).is_empty():
-     rtc_fail("Generated connection code exceeds prototype limits • automatic signaling deferred")
+     rtc_fail("Generated connection details exceed prototype limits")
      return
     signal_out.text = code
     pairing_copy.disabled = false
     pairing_paste.disabled = mode != "host"
     pairing_hint.text = "HOST · 1 of 2\nCopy your invitation and send it to your guest. Then enter their reply." if mode == "host" else "JOIN · 2 of 2\nCopy your reply and send it to the host now. They must accept it to connect."
     if state != WebRTCPeerConnection.STATE_CONNECTED:
-     status.text = "Connection code ready • send privately to partner"
+     status.text = "Connection ready · waiting for partner" if lobby != null and lobby.active else "Connection code ready • send privately to partner"
 
 func _process(_dt):
  rtc_update(Time.get_ticks_msec())
@@ -510,6 +556,7 @@ func _exit_tree():
  if core != null: core.close()
 
 func solo():
+ if lobby != null: lobby.close()
  setup_menu.hide()
  signal_panel.hide()
  reset_network()
@@ -520,8 +567,10 @@ func solo():
  status.text = "Solo"
 
 func host():
+ if lobby != null: lobby.close()
  setup_menu.hide()
  if OS.has_feature("web"):
+  solo()
   show_pairing("host")
   rtc_offer()
   return
@@ -539,6 +588,7 @@ func host():
  status.text = "Host / UDP %d / waiting" % port
 
 func join_game():
+ if lobby != null: lobby.close()
  setup_menu.hide()
  if OS.has_feature("web"):
   solo()
@@ -647,7 +697,7 @@ func _physics_process(dt):
  if tick % 60 == 0 and mode != "solo":
   for peer_id in multiplayer.get_peers(): queue_packet("ping",[peer_id,Time.get_ticks_msec()])
  if OS.has_feature("web") and debug_label != null:
-  debug_label.get_parent().visible = mode != "solo" and rtc_route_mode == 1 and not signal_panel.visible and not setup_menu.visible
+  debug_label.get_parent().visible = mode != "solo" and rtc_route_mode == 1 and not signal_panel.visible and not setup_menu.visible and not (lobby != null and lobby.panel.visible)
   if tick % 15 == 0:
    var age = Time.get_ticks_msec()-last_snapshot_ms if last_snapshot_ms > 0 else -1
    debug_label.text = "RTT %s ms / actors %d / dummy HP %d / tick %d\nTX %d RX %d / snapshot %d / age %d ms" % [str(rtt) if rtt>=0 else "--",players.size(),enemy_hp,core.command(10,0),tx,rx,snapshot_seq if mode=="host" else last_snapshot_seq,age]
@@ -660,12 +710,13 @@ func _physics_process(dt):
   axis = control_input[0]
   jump = control_input[1]
   attack = control_input[2]
- if typing or setup_menu.visible or signal_panel.visible: axis = 0; jump = false; attack = false
- if test_mode == "client": axis = 1.0 if elapsed < 2.4 else 0.0; jump = elapsed < 2 and fmod(elapsed,1.2)<0.15; attack = true
+ var ui_open = typing or setup_menu.visible or signal_panel.visible or (lobby != null and lobby.panel.visible)
+ if ui_open: axis = 0; jump = false; attack = false
+ if test_mode == "client": axis = 1.0 if players.get(2,{}).get("x",0.0) < 680.0 else 0.0; jump = elapsed < 2 and fmod(elapsed,1.2)<0.15; attack = true
  if mode == "client" and rtc == null and multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED and elapsed-connected_at > (60 if OS.has_feature("web") else 8):
   solo()
   status.text = "Connection timed out • returned to solo"
- if mode != "client" and Input.is_physical_key_pressed(KEY_R): core.command(11)
+ if not ui_open and mode != "client" and Input.is_physical_key_pressed(KEY_R): core.command(11)
  core.step(axis,jump,attack)
  sync_core_view()
  enemy_flash = maxf(0,enemy_flash-dt)

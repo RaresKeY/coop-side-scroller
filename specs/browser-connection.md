@@ -4,7 +4,7 @@ Owners: `src/connection_codes.gd`, WebRTC setup/state handling in `src/main.gd`,
 
 ## Current boundary
 
-GitHub Pages serves static HTTPS game files. Browser peers use manual offer/answer/ICE exchange with the protected [Cloudflare TURN service](turn-service.md), or explicit direct-only Google STUN mode. Automatic signaling and a general internet-connectivity guarantee remain absent. Native ENet is a separate direct UDP lab transport. All of this remains outside the portable simulation core.
+GitHub Pages serves static HTTPS game files. Browser peers normally use authenticated [private lobbies](private-lobbies.md) for automatic offer/answer/ICE exchange with the protected [Cloudflare TURN service](turn-service.md), or explicit direct-only Google STUN mode. Advanced manual pairing remains available. A general internet-connectivity guarantee remains absent. Native ENet is a separate direct UDP lab transport. All of this remains outside the portable simulation core.
 
 The menu selects direct + relay fallback, relay-only testing, or direct-only. Relay modes require a private invitation in the masked menu field. Reset/solo/new sessions clear old inbound and outbound codes. There are no new gameplay controls or animation selectors.
 
@@ -38,6 +38,14 @@ Host creates its invitation automatically; Join cannot create an offer. Each sid
 
 Entering a code opens a focused browser-native textarea with Continue/Cancel. This uses ordinary browser paste, not async Clipboard API reads or Godot's cached clipboard. Remote desktop users can first transfer text through their desktop clipboard panel. Copy fallback exposes a selectable read-only textarea as well as its direct Copy button. Reset cancels open dialogs; private code contents are not saved, logged or put in URLs.
 
-This remains a manual two-way exchange and does not prevent ICE failure while the guest waits for the host to accept its reply. A guided UI is not a substitute for signaling. Short room codes, automatic offer/answer exchange and retry/re-signaling require an expiring protected signaling service; they are deferred in BACKLOG.md. Workstation↔Runpod Chrome forced-relay movement/combat now passes via the dedicated controller; Firefox and manual remote-desktop clipboard acceptance are still unverified.
+The advanced fallback remains a manual two-way exchange and does not prevent ICE failure while the guest waits for the host to accept its reply. A guided UI is not a substitute for signaling. The primary Private rooms flow now exchanges signals automatically through an expiring protected directory; reconnect/ICE restart remains deferred. Workstation↔Runpod Chrome forced-relay movement/combat now passes via the dedicated controller; Firefox and manual remote-desktop clipboard acceptance are still unverified.
 
 Cross-network harness: after explicitly deploying the separate controller described in [Runpod setup](../design/runpod-agent-browser.md), run `gamescope --backend headless -W 960 -H 540 -w 960 -h 540 --xwayland-count 1 -- python3 tests/browser_cross_network.py`. Both peers load the public game; no local Web export is required. The harness uses real game UI with test-only in-memory Copy capture, not a production signaling service. Delete the owned disposable controller pod after testing. See [verification](verification.md) for the observed result and limits.
+
+## Review hardening
+
+Every WebRTC description/candidate callback is bound to the connection generation; callbacks arriving after reset cannot write descriptions/candidates into another session. Opening Menu temporarily hides pending pairing; closing Menu restores it, while established connections return to gameplay. Connection reset still clears both raw codes and dialogs.
+
+A Clipboard API operation that settles after the fallback is shown cannot dismiss that active dialog. Explicit Copy/Cancel/Escape/reset controls its lifetime; teardown clears the textarea even if an external reference to its detached node exists. Tab/Shift+Tab can reach the selectable code and both buttons.
+
+The cross-network harness retains historical success in `build/cross-network.json`, but marks each new attempt separately in `build/cross-network-latest.json` with start time and running/pass/fail state. A startup interruption leaves running, never an old current pass. This prevents a failed retry from being mistaken for historical acceptance.

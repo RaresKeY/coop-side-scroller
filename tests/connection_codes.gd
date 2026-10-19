@@ -1,12 +1,23 @@
 extends SceneTree
 const Codes = preload("res://src/connection_codes.gd")
 class FakeRTC extends WebRTCPeerConnectionExtension:
+ var descriptions := 0
  var state := WebRTCPeerConnection.STATE_NEW
  var gathering := WebRTCPeerConnection.GATHERING_STATE_NEW
  func _get_connection_state() -> WebRTCPeerConnection.ConnectionState: return state
  func _get_gathering_state() -> WebRTCPeerConnection.GatheringState: return gathering
  func _get_signaling_state() -> WebRTCPeerConnection.SignalingState: return WebRTCPeerConnection.SIGNALING_STATE_HAVE_LOCAL_OFFER
  func _close(): state = WebRTCPeerConnection.STATE_CLOSED
+ func _set_local_description(_type: String, _sdp: String) -> Error:
+  descriptions += 1
+  return OK
+
+class FakeLobby extends "res://src/private_lobby.gd":
+ signal complete_request
+ var response := {}
+ func request_data(_data: Dictionary, _generation: int) -> Dictionary:
+  await complete_request
+  return response
 
 var failed := false
 func check(value: bool, message: String):
@@ -38,6 +49,33 @@ func _initialize():
 func scene_checks():
  var scene = load("res://main.tscn").instantiate()
  root.add_child(scene)
+ # A closed connection can still deliver queued browser callbacks.
+ var previous = FakeRTC.new()
+ scene.rtc = previous
+ scene.local_signal = {"type":"", "sdp":"", "ice":[]}
+ scene.bind_rtc_callbacks(scene.connection_generation)
+ scene.solo()
+ var current = FakeRTC.new()
+ scene.rtc = current
+ scene.local_signal = {"type":"", "sdp":"", "ice":[]}
+ previous.session_description_created.emit("offer","v=0 old")
+ previous.ice_candidate_created.emit("0",0,"candidate:old")
+ check(current.descriptions == 0 and scene.local_signal.sdp == "" and scene.local_signal.ice.is_empty(),"Late callbacks corrupted replacement connection")
+ scene.bind_rtc_callbacks(scene.connection_generation)
+ current.session_description_created.emit("offer","v=0 current")
+ current.ice_candidate_created.emit("0",0,"candidate:current")
+ check(current.descriptions == 1 and scene.local_signal.sdp == "v=0 current" and scene.local_signal.ice.size() == 1,"Current callbacks were discarded")
+ scene.show_pairing("host")
+ scene.toggle_menu()
+ check(scene.setup_menu.visible and not scene.signal_panel.visible,"Menu did not open over pending pairing")
+ scene.toggle_menu()
+ check(not scene.setup_menu.visible and scene.signal_panel.visible,"Pending pairing could not resume from Menu")
+ current.state = WebRTCPeerConnection.STATE_CONNECTED
+ scene.signal_panel.hide()
+ scene.toggle_menu()
+ scene.toggle_menu()
+ check(not scene.signal_panel.visible,"Menu reopened pairing for an established connection")
+ scene.solo()
  scene.signal_out.text = "stale code"
  scene.signal_in.text = "stale answer"
  scene.solo()
@@ -105,6 +143,39 @@ func scene_checks():
  check(scene.rtc == connected,"Established connection skipped disconnect grace")
  scene.rtc_fail("Connection test failure")
  check(scene.mode == "solo" and scene.setup_menu.visible and scene.status.text == "Connection test failure","Failure did not return to setup")
+ # Cancelling a lobby entry while HTTP is in flight must not resurrect it.
+ var canvas = scene.lobby.panel.get_parent()
+ scene.lobby.panel.free()
+ scene.lobby.free()
+ var fake_lobby = FakeLobby.new()
+ scene.add_child(fake_lobby)
+ fake_lobby.setup(scene,canvas)
+ fake_lobby.set_process(false)
+ scene.lobby = fake_lobby
+ fake_lobby.active = true
+ fake_lobby.response = {"version":1,"id":"ABCDEF12","role":"client"}
+ fake_lobby.enter_room("join","ABCDEF12")
+ check(fake_lobby.busy,"Lobby request did not start")
+ scene.solo()
+ fake_lobby.complete_request.emit()
+ check(not fake_lobby.active and fake_lobby.room_id == "" and scene.rtc == null,"Cancelled lobby response resurrected a session")
+ fake_lobby.active = true
+ fake_lobby.panel.show()
+ scene.toggle_menu()
+ check(scene.setup_menu.visible and not fake_lobby.panel.visible,"Menu did not hide lobby")
+ scene.toggle_menu()
+ check(fake_lobby.panel.visible and not scene.setup_menu.visible,"Menu did not restore lobby")
+ # A connected session survives the peer completing directory cleanup first.
+ var live_peer = FakeRTC.new()
+ live_peer.state = WebRTCPeerConnection.STATE_CONNECTED
+ scene.rtc = live_peer
+ fake_lobby.room_id = "ABCDEF12"
+ fake_lobby.response = {"error":"Room full, closed or expired; refresh and try again"}
+ fake_lobby.sync_room()
+ fake_lobby.complete_request.emit()
+ check(scene.rtc == live_peer and not fake_lobby.active and not fake_lobby.panel.visible,"Signaling cleanup terminated connected gameplay")
+ fake_lobby.room_id = "" # Fixture cleanup needs no HTTP leave.
+ scene.solo()
  print("CONNECTION CODE/SETUP TEST ","FAIL" if failed else "PASS")
  scene.free()
  quit(1 if failed else 0)

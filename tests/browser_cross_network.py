@@ -11,7 +11,7 @@ from browser_relay import INSTRUMENT,wait_until,type_text,key
 ROOT=Path(__file__).resolve().parents[1]
 URL='https://rareskey.github.io/coop-side-scroller/'
 COPY_CAPTURE="""(()=>{const original=EmberClipboard;globalThis.testCopied='';globalThis.EmberClipboard={cancel:()=>original.cancel(),paste:(...a)=>original.paste(...a),copy:(text,done)=>{testCopied=text;done(true)}};return true})()"""
-ROUTE="""(async()=>{const p=testPeers.at(-1),s=await p.getStats();const pair=[...s.values()].find(x=>x.type==='candidate-pair'&&x.state==='succeeded'&&x.nominated);return {policy:p.getConfiguration().iceTransportPolicy,state:p.connectionState,local:s.get(pair?.localCandidateId)?.candidateType,remote:s.get(pair?.remoteCandidateId)?.candidateType,bytesSent:pair?.bytesSent,bytesReceived:pair?.bytesReceived,rttMs:1000*(pair?.currentRoundTripTime||0),core:EmberCoreWeb.diagnostics().views[0]}})()"""
+ROUTE="""(async()=>{const p=testPeers.at(-1),s=await p.getStats();const transport=[...s.values()].find(x=>x.type==='transport'&&x.selectedCandidatePairId);const pair=s.get(transport?.selectedCandidatePairId)||[...s.values()].find(x=>x.type==='candidate-pair'&&x.state==='succeeded'&&x.nominated);return {policy:p.getConfiguration().iceTransportPolicy,state:p.connectionState,local:s.get(pair?.localCandidateId)?.candidateType,remote:s.get(pair?.remoteCandidateId)?.candidateType,bytesSent:pair?.bytesSent,bytesReceived:pair?.bytesReceived,rttMs:1000*(pair?.currentRoundTripTime||0),core:EmberCoreWeb.diagnostics().views[0]}})()"""
 SAFE="({http:globalThis.testHttp,peers:globalThis.testPeers?.map(p=>({state:p.connectionState,gather:p.iceGatheringState,local:p.localDescription?.type,remote:p.remoteDescription?.type})),core:globalThis.EmberCoreWeb?.diagnostics()})"
 class Remote:
  def __init__(self,browser):self.browser=browser
@@ -31,11 +31,15 @@ def enter(page,text):
  time.sleep(.15)
 def run():
  parser=argparse.ArgumentParser();parser.add_argument('--controller-dir',type=Path,default=ROOT.parent/'tooling/runpod-browser');args=parser.parse_args()
+ output=ROOT/'build';output.mkdir(exist_ok=True)
+ # Keep historical success, but never leave it labelled as the current attempt.
+ started=time.time()
+ report_path=output/'cross-network-latest.json'
+ report_path.write_text(json.dumps({'result':'running','started_at_unix':started})+'\n')
  sys.path.insert(0,str(args.controller_dir));from client import Browser
  remote=Browser();health=remote.request('/health');assert health['ready'],'Controller not ready'
  guest=Remote(remote)
  token=json.loads((Path.home()/'.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
- output=ROOT/'build';output.mkdir(exist_ok=True)
  stage='startup';host=None
  with tempfile.TemporaryDirectory(prefix='ember-cross-network-') as profile,(output/'cross-network-browser.log').open('w') as log:
   process=subprocess.Popen(['chromium','--ozone-platform=x11','--mute-audio','--no-first-run','--no-default-browser-check','--disable-background-timer-throttling','--disable-renderer-backgrounding','--remote-debugging-port=0','--remote-allow-origins=*',f'--user-data-dir={profile}','about:blank'],stdout=log,stderr=log)
@@ -50,12 +54,12 @@ def run():
    for page in [host,guest]:
     wait_until(lambda:page.evaluate('globalThis.EmberCoreWeb?.diagnostics().calls>120'),90)
     page.evaluate(COPY_CAPTURE)
-    page.click(160,327);type_text(page,token)
-    page.click(180,361);page.click(160,422)
-   stage='host invitation';print('BOTH BROWSERS CONFIGURED',flush=True);host.click(160,216)
+    page.click(160,283);type_text(page,token)
+    page.click(180,317);page.click(160,378);page.click(160,354)
+   stage='host invitation';print('BOTH BROWSERS CONFIGURED',flush=True);host.click(160,387)
    wait_until(lambda:host.evaluate('testPeers.at(-1)?.iceGatheringState==="complete"'),30)
    host.click(90,185);offer=host.evaluate('testCopied');assert len(offer)>100
-   stage='guest reply';print('HOST INVITATION READY',flush=True);guest.click(160,260);guest.click(240,185);enter(guest,offer)
+   stage='guest reply';print('HOST INVITATION READY',flush=True);guest.click(160,421);guest.click(240,185);enter(guest,offer)
    wait_until(lambda:guest.evaluate('testPeers.at(-1)?.iceGatheringState==="complete"'),30)
    guest.click(90,185);answer=wait_until(lambda:guest.evaluate('testCopied'),5);assert len(answer)>100 and answer!=offer
    stage='connect';print('GUEST REPLY READY',flush=True);host.click(240,185);enter(host,answer)
@@ -88,10 +92,12 @@ def run():
    stage='route evidence';reports=[page.evaluate(ROUTE) for page in [host,guest]]
    for report in reports:assert report['policy']=='relay' and report['local']=='relay' and report['remote']=='relay' and report['bytesReceived']>0 and report['bytesSent']>0,'Relay route not proven'
    host.capture(output/'cross-network-host.png');guest.capture(output/'cross-network-guest.png')
-   report={'result':'pass','game_url':URL,'host_network':'workstation','guest_network':'Runpod','guest_browser':health['browser'],'pairing':'guided UI with in-memory test copy capture and native DOM input; no remote desktop clipboard','routes':reports,'limitations':['Chrome only','remote software rendering','no blocked-UDP/TCP-only test','no general NAT reliability claim']}
+   report={'result':'pass','started_at_unix':started,'game_url':URL,'host_network':'workstation','guest_network':'Runpod','guest_browser':health['browser'],'pairing':'guided UI with in-memory test copy capture and native DOM input; no remote desktop clipboard','routes':reports,'limitations':['Chrome only','remote software rendering','no blocked-UDP/TCP-only test','no general NAT reliability claim']}
    (output/'cross-network.json').write_text(json.dumps(report,indent=2)+'\n')
+   report_path.write_text(json.dumps(report,indent=2)+'\n')
    print('CROSS-NETWORK RELAY/COMBAT PASS',json.dumps(report),flush=True)
   except Exception as error:
+   report_path.write_text(json.dumps({'result':'fail','started_at_unix':started,'stage':stage,'error_type':type(error).__name__})+'\n')
    print('CROSS-NETWORK FAILED AT',stage,'error type',type(error).__name__,flush=True)
    for name,page in [('host',host),('guest',guest)]:
     if page is not None:

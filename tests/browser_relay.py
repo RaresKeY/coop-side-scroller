@@ -3,12 +3,12 @@
 Run under offscreen Gamescope. Invitation is read privately; never logged/saved.
 This same-machine test proves relay use, not independent access networks.
 """
-import functools,http.server,json,signal,subprocess,tempfile,threading,time,urllib.request
+import argparse,functools,http.server,json,signal,subprocess,tempfile,threading,time,urllib.request
 from pathlib import Path
 from browser_cdp import CDP,QuietHandler
 ROOT=Path(__file__).resolve().parents[1]
 signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(SystemExit(143)))
-INSTRUMENT='''globalThis.testPeers=[];globalThis.testHttp=[];const nativeFetch=globalThis.fetch;globalThis.fetch=async(...args)=>{const r=await nativeFetch(...args);if(String(args[0]).includes('workers.dev'))testHttp.push(r.status);return r;};const NativeRTC=globalThis.RTCPeerConnection;
+INSTRUMENT='''globalThis.testPeers=[];globalThis.testHttp=[];const nativeFetch=globalThis.fetch;globalThis.fetch=async(...args)=>{const r=await nativeFetch(...args);if(String(args[0]).includes('workers.dev'))testHttp.push(r.status);if(r.url.endsWith('/v1/lobby')&&r.ok){const d=await r.clone().json();if(d.rooms)globalThis.testRoomList=d.rooms;if(d.id)globalThis.testRoomId=d.id;if(d.complete)globalThis.testRoomComplete=true;}return r;};const NativeRTC=globalThis.RTCPeerConnection;
 globalThis.RTCPeerConnection=class extends NativeRTC {constructor(...args){super(...args);testPeers.push(this);}};'''
 def wait_until(check,seconds=35):
  end=time.monotonic()+seconds
@@ -28,10 +28,10 @@ def enter_code(page,text):
  page.call('Input.insertText',{'text':text})
  bounds=page.evaluate("(()=>{const r=document.querySelector('[data-ember-accept]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
  page.click(bounds['x'],bounds['y'])
-def run():
+def run(lobby=False, url=None):
  token=json.loads((Path.home()/'.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
  server=http.server.ThreadingHTTPServer(('127.0.0.1',27841),functools.partial(QuietHandler,directory=str(ROOT/'build/web')))
- threading.Thread(target=server.serve_forever,daemon=True).start();origin='http://127.0.0.1:27841'
+ threading.Thread(target=server.serve_forever,daemon=True).start();origin=url or 'http://127.0.0.1:27841'
  with tempfile.TemporaryDirectory(prefix='ember-relay-') as profile,(ROOT/'build/relay-browser.log').open('w') as log:
   browser=subprocess.Popen(['chromium','--ozone-platform=x11','--no-first-run','--no-default-browser-check','--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows','--remote-debugging-port=0','--remote-allow-origins=*',f'--user-data-dir={profile}','about:blank'],stdout=log,stderr=log)
   try:
@@ -46,29 +46,58 @@ def run():
     page.call('Runtime.enable');page.call('Page.enable');page.call('Page.addScriptToEvaluateOnNewDocument',{'source':INSTRUMENT})
     page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
     page.call('Page.navigate',{'url':origin});wait_until(lambda:page.evaluate('globalThis.EmberCoreWeb?.diagnostics().calls>100'))
-    control.call('Target.activateTarget',{'targetId':target});time.sleep(.2);page.click(160,327);type_text(page,token);page.click(180,361)
-    page.click(160,422) # Second popup item: Relay only.
+    control.call('Target.activateTarget',{'targetId':target});time.sleep(.2);page.click(160,283);type_text(page,token);page.click(180,317)
+    page.click(160,378) # Second popup item: Relay only.
+    if not lobby: page.click(160,354) # Advanced manual pairing.
     pages.append((target,page));print('SETUP',role,flush=True)
    host,guest=[item[1] for item in pages]
-   control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(160,216)
-   wait_until(lambda:host.evaluate('testPeers.length'),15)
-   wait_until(lambda:host.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
-   assert host.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay','Relay-only UI selection failed'
-   print('HOST RELAY READY',flush=True)
-   for width,height in [(1920,1080),(1280,720),(960,540),(854,480)]:
-    host.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':False})
-    time.sleep(.15);host.capture(ROOT/f'build/pairing-host-{width}.png')
-   host.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
+   if lobby:
+    control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(160,216)
+    wait_until(lambda:host.evaluate('testHttp.includes(200)'),12)
+    time.sleep(.3);host.capture(ROOT/'build/lobby-directory.png')
+    host.click(160,170)
+    host.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'a','code':'KeyA','windowsVirtualKeyCode':65,'modifiers':2})
+    host.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'a','code':'KeyA','windowsVirtualKeyCode':65,'modifiers':2})
+    type_text(host,'W'*32)
+    host.click(160,201) # Create room.
+    wait_until(lambda:host.evaluate('testPeers.length'),15)
+    host.capture(ROOT/'build/lobby-waiting.png')
+    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,216)
+    wait_until(lambda:guest.evaluate('testHttp.includes(200)'),12)
+    room_id=wait_until(lambda:host.evaluate('globalThis.testRoomId'),5)
+    wait_until(lambda:guest.evaluate('globalThis.testRoomList?.some(r=>r.id==='+json.dumps(room_id)+')'),8)
+    time.sleep(.2)
+    for width,height in [(1920,1080),(1280,720),(960,540),(854,480)]:
+     guest.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':False})
+     time.sleep(.15);guest.capture(ROOT/f'build/lobby-join-{width}.png')
+    guest.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
+    guest.capture(ROOT/'build/lobby-join.png')
+    index=guest.evaluate('testRoomList.findIndex(r=>r.id==='+json.dumps(room_id)+')')
+    assert 0<=index<3,'Test room outside visible rows; do not join another room'
+    guest.click(160,285+index*36) # First room's Join button.
+    wait_until(lambda:guest.evaluate('testPeers.length'),25)
+    assert all(page.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay' for page in [host,guest])
+    print('LOBBY AUTOMATIC SIGNALING',flush=True)
+   else:
+    control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(160,387)
+    wait_until(lambda:host.evaluate('testPeers.length'),15)
+    wait_until(lambda:host.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
+    assert host.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay','Relay-only UI selection failed'
+    print('HOST RELAY READY',flush=True)
+    for width,height in [(1920,1080),(1280,720),(960,540),(854,480)]:
+     host.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':False})
+     time.sleep(.15);host.capture(ROOT/f'build/pairing-host-{width}.png')
+    host.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
 
-   # Godot's actual Copy/Paste buttons exchange its versioned codes in memory.
-   host.click(90,185);time.sleep(.2)
-   offer=host.evaluate('navigator.clipboard.readText()');assert len(offer)>100,'No offer copied'
-   control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,260)
-   guest.click(240,185);enter_code(guest,offer)
-   wait_until(lambda:guest.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
-   guest.click(90,185);time.sleep(.2);answer=guest.evaluate('navigator.clipboard.readText()');assert answer!=offer and len(answer)>100,'No answer copied'
-   control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(240,185);enter_code(host,answer)
-   print('CODES EXCHANGED',flush=True)
+    # Godot's actual Copy/Paste buttons exchange its versioned codes in memory.
+    host.click(90,185);time.sleep(.2)
+    offer=host.evaluate('navigator.clipboard.readText()');assert len(offer)>100,'No offer copied'
+    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,421)
+    guest.click(240,185);enter_code(guest,offer)
+    wait_until(lambda:guest.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
+    guest.click(90,185);time.sleep(.2);answer=guest.evaluate('navigator.clipboard.readText()');assert answer!=offer and len(answer)>100,'No answer copied'
+    control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(240,185);enter_code(host,answer)
+    print('CODES EXCHANGED',flush=True)
    for page in [host,guest]:wait_until(lambda:page.evaluate('testPeers.at(-1).connectionState==="connected"'))
    wait_until(lambda:all(page.evaluate('EmberCoreWeb.diagnostics().views[0].actors===2') for page in [host,guest]))
    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(800,420)
@@ -79,20 +108,25 @@ def run():
    key(guest,'f','KeyF',70,False)
    reports=[]
    for page in [host,guest]:
-    report=page.evaluate('''(async()=>{const p=testPeers.at(-1),s=await p.getStats();const pair=[...s.values()].find(x=>x.type==='candidate-pair'&&x.state==='succeeded'&&x.nominated);return {policy:p.getConfiguration().iceTransportPolicy,state:p.connectionState,local:s.get(pair?.localCandidateId)?.candidateType,remote:s.get(pair?.remoteCandidateId)?.candidateType,bytesSent:pair?.bytesSent,bytesReceived:pair?.bytesReceived,rttMs:1000*(pair?.currentRoundTripTime||0),core:EmberCoreWeb.diagnostics().views[0]};})()''')
-    assert report['local']=='relay' and report['remote']=='relay' and report['bytesReceived']>0,'Relay traffic not proven'
+    def selected_route():
+     report=page.evaluate('''(async()=>{const p=testPeers.at(-1),s=await p.getStats();const transport=[...s.values()].find(x=>x.type==='transport'&&x.selectedCandidatePairId);const pair=s.get(transport?.selectedCandidatePairId)||[...s.values()].find(x=>x.type==='candidate-pair'&&x.state==='succeeded'&&x.nominated);return {policy:p.getConfiguration().iceTransportPolicy,state:p.connectionState,local:s.get(pair?.localCandidateId)?.candidateType,remote:s.get(pair?.remoteCandidateId)?.candidateType,bytesSent:pair?.bytesSent,bytesReceived:pair?.bytesReceived,rttMs:1000*(pair?.currentRoundTripTime||0),core:EmberCoreWeb.diagnostics().views[0]};})()''')
+     return report if report.get('local')=='relay' and report.get('remote')=='relay' and report.get('bytesReceived',0)>0 else None
+    report=wait_until(selected_route,8)
     reports.append(report)
+   if lobby:wait_until(lambda:any(page.evaluate('globalThis.testRoomComplete===true') for page in [host,guest]),8)
    assert not host.errors and not guest.errors,'Browser console errors (details withheld)'
    host.capture(ROOT/'build/relay-host.png');guest.capture(ROOT/'build/relay-guest.png')
-   print('GODOT LIVE FORCED RELAY PASS',json.dumps(reports))
+   print('GODOT LIVE PRIVATE LOBBY RELAY PASS' if lobby else 'GODOT LIVE FORCED RELAY PASS',json.dumps(reports))
+   (ROOT/('build/lobby-relay.json' if lobby else 'build/relay.json')).write_text(json.dumps({'result':'pass','lobby':lobby,'reports':reports},indent=2)+'\n')
   finally:
    for i,(_,page) in enumerate(locals().get('pages',[])):
     try:
      print('RELAY DIAGNOSTIC',i,page.evaluate('({core:globalThis.EmberCoreWeb?.diagnostics(),http:globalThis.testHttp,peers:globalThis.testPeers?.map(p=>({gathering:p.iceGatheringState,state:p.connectionState,policy:p.getConfiguration().iceTransportPolicy,candidates:(p.localDescription?.sdp.match(/a=candidate:/g)||[]).length}))})'))
-     if page.evaluate('testPeers.length===0'):page.capture(ROOT/f'build/relay-setup-{i}.png')
+     page.capture(ROOT/f'build/relay-setup-{i}.png')
     except Exception:pass
    browser.terminate()
    try:browser.wait(timeout=5)
    except subprocess.TimeoutExpired:browser.kill();browser.wait()
    server.shutdown();server.server_close()
-if __name__=='__main__':run()
+if __name__=='__main__':
+ parser=argparse.ArgumentParser();parser.add_argument('--lobby',action='store_true');parser.add_argument('--url');args=parser.parse_args();run(args.lobby,args.url)

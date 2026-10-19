@@ -5,3 +5,8 @@ preview.png
 preview.png.import
 
 __pycache__/
+.env
+.env.*
+!.env.example
+*.pem
+*.key

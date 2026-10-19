@@ -32,6 +32,8 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
    time.sleep(.15)
   assert ready and ready['live']==1 and ready['views'][0]['tick']>0,ready
   page.capture(ROOT/'build/web-onboarding.png')
+  assert page.evaluate("""(()=>{const h=EmberCoreWeb.create();try{return [NaN,Infinity,-Infinity,0.5,4294967298,'2',null].every(op=>EmberCoreWeb.command(h,op,0,0)===-2)&&EmberCoreWeb.command(h,1,4294967296,0)===-2&&EmberCoreWeb.command(h,1,0,4294967296)===-2&&EmberCoreWeb.command(h,10,0,0)===0&&EmberCoreWeb.command(0,2,0,0)===-1;}finally{EmberCoreWeb.destroy(h)}})()"""),'Web ABI silently narrowed invalid arguments'
+
   if args.clipboard_check:
    parsed=urlparse(origin)
    control.call('Browser.grantPermissions',{'origin':parsed.scheme+'://'+parsed.netloc,'permissions':['clipboardReadWrite','clipboardSanitizedWrite']})
@@ -51,6 +53,18 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
    page.evaluate("globalThis.copyResult=null;EmberClipboard.copy('public-cancel-probe',success=>copyResult=success);true")
    time.sleep(.1);page.evaluate('EmberClipboard.cancel();true')
    assert page.evaluate("copyResult===false && !document.querySelector('[role=dialog]')"),'Cancelled code retained'
+   page.evaluate("globalThis.copyResult=null;Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:()=>new Promise(resolve=>globalThis.resolveSlowCopy=resolve)});EmberClipboard.copy('public-slow-probe',success=>copyResult=success);true")
+   for _ in range(60):
+    if page.evaluate("!!document.querySelector('[data-ember-copy]')"):break
+    time.sleep(.1)
+   assert page.evaluate("!!document.querySelector('[data-ember-copy]')"),'Copy timeout did not open fallback'
+   page.evaluate('resolveSlowCopy();true')
+   assert page.evaluate("copyResult===null && !!document.querySelector('[role=dialog]')"),'Late clipboard completion dismissed active fallback'
+   page.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'Tab','code':'Tab','windowsVirtualKeyCode':9,'modifiers':8})
+   page.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'Tab','code':'Tab','windowsVirtualKeyCode':9})
+   assert page.evaluate("document.activeElement===document.querySelector('[role=dialog] textarea')"),'Copy fallback code cannot be reached with Shift+Tab'
+   page.evaluate("globalThis.detachedCodeField=document.querySelector('[role=dialog] textarea');EmberClipboard.cancel();true")
+   assert page.evaluate("copyResult===false && detachedCodeField.value==='' && !document.querySelector('[role=dialog]')"),'Cancel retained code in detached fallback field'
    for width,height in [(1920,1080),(1280,720),(960,540),(854,480)]:
     page.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':False})
     page.evaluate("globalThis.pasteResult=null;EmberClipboard.paste('Enter host invitation',value=>pasteResult=value);true")
@@ -101,7 +115,8 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
   if args.connection_setup:
    page.click(55,70) # Open Menu, then Host game.
    time.sleep(.15)
-   page.click(110,212)
+   page.click(110,354) # Reveal manual connection controls.
+   page.click(110,387)
    time.sleep(2)
    page.capture(ROOT/'build/web-connection.png')
    # Inspect this capture for setup/failure UI; this does not assert P2P success.

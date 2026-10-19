@@ -20,7 +20,7 @@ python3 tools/build_core.py
 
 The launcher checks core freshness without rebuilding. Other machines can use the standalone CMake example or build the core for their target; the current native Godot shim is tested on Linux x86_64. Godot 4.7 Web uses the same core compiled as a separate import-free Wasm module, awaited before engine startup. There is no fallback GDScript simulation.
 
- Start with the Play solo / Host game / Join game menu. During play, only Menu, status and simple controls remain onscreen. Setup and browser connection codes stay in menus. Move with A/D, jump with W, attack with F. Arrows/Up/L are the alternate scheme. This build is silent.
+ Start with Play solo or Private rooms in the browser; native builds use Host game / Join game. During play, only Menu, status and simple controls remain onscreen. Setup and browser connection codes stay in menus. Move with A/D, jump with W, attack with F. Arrows/Up/L are the alternate scheme. This build is silent.
 
 ## Live network lab
 
@@ -48,17 +48,17 @@ The import script needs Python 3 and Pillow; it copies seven character sheets, t
 
 ## Browser P2P
 
-The web build uses WebRTC data channels. Host runs simulation; guest sends bounded movement/jump/attack input. Host sends snapshots at 20 Hz. Browser Host creates an offer; Join opens the code panel. Send codes through your existing private chat:
+The web build uses WebRTC data channels. Host runs simulation; guest sends bounded movement/jump/attack input. Host sends snapshots at 20 Hz.
 
-1. Host: Create offer, wait for your code, Copy my code and send it to guest.
-2. Guest: copy the received offer, Paste and accept, wait for the answer code, Copy my code and send it back.
-3. Host: copy the answer, Paste and accept. Wait for connection status. If clipboard permission is denied, paste into the lower field and use Accept pasted code.
+1. Both players enter the same privately shared **playtest access code** in Menu.
+2. Open **Private rooms**. One player clicks **Create room**; the other clicks **Join** on that room.
+3. Connection setup and temporary relay credentials are exchanged automatically. Keep both pages open until connected.
 
-Browser co-op is experimental. In Menu, enter your private playtest access code for Direct + relay fallback (default), or select Relay only to test TURN. Direct only requires no invitation. The [protected credential service](specs/turn-service.md) keeps the master key on the server and issues one-hour credentials.
+Default **Direct + relay fallback** attempts P2P and uses Cloudflare TURN where needed. **Relay only (test)** forces TURN and displays latency/debug information. The key protects the directory and relay issuance; it provides no Cloudflare account administration. It is retained only in page memory, and the server enforces its expiry. No key is shipped in this public repository or site.
 
-Both players must use the same code format; regenerate codes after updating. Old codes clear on reset, and answers must match the pending offer. Setup failures return to the menu with gathering/connection timeout guidance.
+Rooms have two seats, disappear from the available list when full and expire when abandoned. Back / leave room cancels setup. The signaling record is removed once both peers connect; gameplay then continues without lobby polling. See the [private lobby contract](specs/private-lobbies.md) for limits, request usage and testing evidence. All holders of the shared key belong to the same private playtest group; there are no individual accounts or bans.
 
-Keep both tabs active during setup. This manually replaces the signaling service, which is deferred. Cloudflare provides STUN and TURN in relay modes; direct-only uses Google STUN. Restrictive networks may still fail. Start a new session before the one-hour credentials expire; automatic refresh is deferred. Refresh or Solo resets a session. Codes contain temporary connection details; do not post them publicly.
+**Manual connection (advanced)** retains the diagnostic invitation/reply flow. Direct-only manual pairing requires no playtest key; private room access always requires one. Automatic reconnect, host migration and TURN refresh remain deferred. Restrictive networks may still fail; start a fresh session before the one-hour TURN credentials expire. Browser relay play passes in Chromium; Firefox and the wider network matrix remain unverified.
 
 Native Host/Join uses ENet on UDP 27840 for local/LAN development. Use the lab for simultaneous independent instances; the controller owns both workers inside one managed runtime, avoiding project-lock conflicts. Native ENet testing does not establish browser WebRTC or internet connectivity.
 

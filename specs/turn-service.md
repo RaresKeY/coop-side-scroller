@@ -16,7 +16,7 @@ Workers rate-limit bindings apply 12 requests/minute/IP and 24 authenticated req
 
 ## Browser behavior
 
-Menu selects Direct + relay fallback (default), Relay only (test), or Direct only (no invitation, Google STUN). Host/Join obtains fresh ICE configuration asynchronously before creating the peer. Solo/reset invalidates pending requests so stale replies cannot create a session. The simulation/C ABI does not know about HTTP, credentials, WebRTC or Cloudflare. Each page owns its own Wasm core. Signaling remains private manual code exchange.
+Menu selects Direct + relay fallback (default), Relay only (test), or Direct only (no invitation, Google STUN). Host/Join obtains fresh ICE configuration asynchronously before creating the peer. Solo/reset invalidates pending requests so stale replies cannot create a session. The simulation/C ABI does not know about HTTP, credentials, WebRTC or Cloudflare. Each page owns its own Wasm core. Signaling normally uses the authenticated [private lobby service](private-lobbies.md) in the same Worker; advanced manual pairing is retained.
 
 Do not promise one-hour uninterrupted sessions: refresh/ICE restart is not implemented. Start a fresh session before credential expiry. TURN improves NAT reachability, but corporate filtering can still block all routes. Native ENet does not use TURN.
 
@@ -29,7 +29,7 @@ From the Cloudflare operator project:
 ./cloudflare test
 ./cloudflare worker-check coop-side-scroller-issuer
 ./cloudflare worker-probe coop-side-scroller-issuer
-./cloudflare worker-deploy coop-side-scroller-issuer --script ember-coop-credentials --source /absolute/path/coop-side-scroller/server/turn/worker.mjs
+./cloudflare worker-deploy coop-side-scroller-issuer --script ember-coop-credentials --source /absolute/path/coop-side-scroller/server/turn/worker.mjs --lobbies
 ```
 
 Deployment checks ownership tags before replacing a Worker and uses API multipart bindings directly; no Wrangler or JavaScript packages. Secrets remain in owner-only config and secret bindings. Do not rerun key creation to recover a failed operation: inspect remote state/private journal first.

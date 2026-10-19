@@ -1,6 +1,6 @@
 # Internet co-op: conventional deployment study
 
-Reviewed 2026-10-19. Recommendation: keep GitHub Pages for the static game, add a small authenticated signaling service and a standards-compatible TURN fallback when internet connectivity becomes a deliverable. Prefer direct WebRTC when it works; relay the same encrypted gameplay stream when it does not. Neither service changes the portable simulation/C ABI. The initial study deployed no services. Subsequent owner authorization added the protected Cloudflare TURN issuer described in [the current service spec](../specs/turn-service.md); automatic signaling remains deferred.
+Reviewed 2026-10-19. Recommendation: keep GitHub Pages for the static game, add a small authenticated signaling service and a standards-compatible TURN fallback when internet connectivity becomes a deliverable. Prefer direct WebRTC when it works; relay the same encrypted gameplay stream when it does not. Neither service changes the portable simulation/C ABI. The initial study deployed no services. Subsequent owner authorization added the protected Cloudflare TURN issuer described in [the current service spec](../specs/turn-service.md); subsequent authorization also added [private lobby signaling](../specs/private-lobbies.md).
 
 ## What a new GitHub page does
 
@@ -9,7 +9,7 @@ Both players load the exported Godot game and portable Wasm core from HTTPS GitH
 The conventional flow is:
 
 1. Host creates a private room; guest joins using an invitation.
-2. Signaling exchanges SDP offers/answers and ICE candidates. Current copy/paste codes do this manually; automated signaling normally uses HTTPS/WSS. It carries connection metadata rather than the 60 Hz game loop.
+2. Signaling exchanges SDP offers/answers and ICE candidates. The private lobby now exchanges these automatically over HTTPS; manual codes remain an advanced fallback. It carries connection metadata rather than the 60 Hz game loop.
 3. Browser ICE tests address pairs. STUN discovers mapped addresses. A successful direct path carries game inputs/snapshots peer to peer.
 4. With configured TURN, ICE can select a relay path if direct candidates do not work. The host still owns simulation; the relay forwards encrypted packets. This is a transport fallback, not a dedicated authoritative game server. [WebRTC peer connections](https://webrtc.org/getting-started/peer-connections), [TURN guidance](https://webrtc.org/getting-started/turn-server), [ICE standard](https://www.rfc-editor.org/rfc/rfc8445.html).
 
