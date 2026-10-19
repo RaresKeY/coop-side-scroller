@@ -7,6 +7,7 @@ Start with [current architecture](architecture.md): portable C++ core, Godot nat
 | Spec | Sources | Read when |
 | --- | --- | --- |
 | [Architecture](architecture.md) | `core/`, `adapters/`, `src/`, `server/turn/` | Understanding ownership, deployment and session lifecycle |
+| [Terminology](terminology.md) | Core, adapter and service contracts | Matching plain-language names to technical terms; distinguishing credentials, IDs and timing measurements |
 | [Portable core](portable-core.md) | `core/`, `adapters/` | Changing fixed-tick simulation, authority or state/event boundaries |
 | [C ABI](c-abi.md) | `core/include/ember_core.h`, `core/src/ember_core.cpp` | Changing lifetime, status, native layouts, serialization or bridge operations |
 | [Builds and targets](build-targets.md) | `CMakeLists.txt`, `tools/build_core.py`, `tests/`, `vendored/` | Building/testing or assessing tested platform support |
