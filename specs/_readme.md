@@ -14,6 +14,7 @@ Start with [current architecture](architecture.md): portable C++ core, Godot nat
 | [Prototype](prototype.md) | `src/main.gd`, `project.godot`, `main.tscn` | Changing gameplay, menus, animation or transport |
 | [Character presentation](character-presentation.md) | `src/character_view.gd`, `shaders/`, animation captures/tests | Changing sprite size, anchors, atlas slicing, frame timing or sampling |
 | [Browser connection](browser-connection.md) | `src/connection_codes.gd`, WebRTC in `src/main.gd`, `adapters/web/ember_core_bridge.js`, `tests/connections.sh` | Changing browser pairing, validation, timeouts or assessing internet/NAT requirements |
+| [Connection diagnostics](diagnostics.md) | `src/diagnostics.gd`, Worker, Cloudflare operator | Recording and retrieving playtest failures |
 | [Private lobbies](private-lobbies.md) | `src/private_lobby.gd`, `server/turn/`, browser lobby tests | Changing authenticated room discovery, automatic signaling, leases or deployment |
 | [TURN service](turn-service.md) | `server/turn/`, `src/relay_credentials.gd`, browser setup | Changing invitation protection, credential issuance, relay configuration or deployment |
 | [Network lab](network-lab.md) | `play-labs.sh`, `labs/`, `src/lab_keys.gd`, `tests/lab.sh` | Changing interactive tests, keyboard routing, latency/debug or process ownership |

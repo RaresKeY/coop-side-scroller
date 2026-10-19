@@ -8,7 +8,7 @@ from pathlib import Path
 from browser_cdp import CDP,QuietHandler
 ROOT=Path(__file__).resolve().parents[1]
 signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(SystemExit(143)))
-INSTRUMENT='''globalThis.testPeers=[];globalThis.testHttp=[];const nativeFetch=globalThis.fetch;globalThis.fetch=async(...args)=>{const r=await nativeFetch(...args);if(String(args[0]).includes('workers.dev'))testHttp.push(r.status);if(r.url.endsWith('/v1/lobby')&&r.ok){const d=await r.clone().json();if(d.rooms)globalThis.testRoomList=d.rooms;if(d.id)globalThis.testRoomId=d.id;if(d.complete)globalThis.testRoomComplete=true;}return r;};const NativeRTC=globalThis.RTCPeerConnection;
+INSTRUMENT='''globalThis.testPeers=[];globalThis.testHttp=[];globalThis.testDiagnosticHttp=[];globalThis.testDiagnosticEvents=[];const nativeFetch=globalThis.fetch;globalThis.fetch=async(...args)=>{const r=await nativeFetch(...args);if(String(args[0]).includes('workers.dev'))testHttp.push(r.status);if(r.url.endsWith('/v1/diagnostics')){testDiagnosticHttp.push(r.status);try{const b=args[1]?.body;const text=typeof b==='string'?b:new TextDecoder().decode(b);testDiagnosticEvents.push(...JSON.parse(text).events.map(e=>e.event));}catch{}}if(r.url.endsWith('/v1/lobby')&&r.ok){const d=await r.clone().json();if(d.rooms)globalThis.testRoomList=d.rooms;if(d.id)globalThis.testRoomId=d.id;if(d.complete)globalThis.testRoomComplete=true;}return r;};const NativeRTC=globalThis.RTCPeerConnection;
 globalThis.RTCPeerConnection=class extends NativeRTC {constructor(...args){super(...args);testPeers.push(this);}};'''
 def wait_until(check,seconds=35):
  end=time.monotonic()+seconds
@@ -46,7 +46,7 @@ def run(lobby=False, url=None):
     page.call('Runtime.enable');page.call('Page.enable');page.call('Page.addScriptToEvaluateOnNewDocument',{'source':INSTRUMENT})
     page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
     page.call('Page.navigate',{'url':origin});wait_until(lambda:page.evaluate('globalThis.EmberCoreWeb?.diagnostics().calls>100'))
-    control.call('Target.activateTarget',{'targetId':target});time.sleep(.2);page.click(160,283);type_text(page,token);page.click(180,317)
+    control.call('Target.activateTarget',{'targetId':target});time.sleep(.2);page.click(160,283);enter_code(page,token);page.click(180,317)
     page.click(160,378) # Second popup item: Relay only.
     if not lobby: page.click(160,354) # Advanced manual pairing.
     pages.append((target,page));print('SETUP',role,flush=True)
@@ -56,9 +56,7 @@ def run(lobby=False, url=None):
     wait_until(lambda:host.evaluate('testHttp.includes(200)'),12)
     time.sleep(.3);host.capture(ROOT/'build/lobby-directory.png')
     host.click(160,170)
-    host.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'a','code':'KeyA','windowsVirtualKeyCode':65,'modifiers':2})
-    host.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'a','code':'KeyA','windowsVirtualKeyCode':65,'modifiers':2})
-    type_text(host,'W'*32)
+    enter_code(host,'W'*32)
     host.click(160,201) # Create room.
     wait_until(lambda:host.evaluate('testPeers.length'),15)
     host.capture(ROOT/'build/lobby-waiting.png')
@@ -116,6 +114,20 @@ def run(lobby=False, url=None):
    if lobby:wait_until(lambda:any(page.evaluate('globalThis.testRoomComplete===true') for page in [host,guest]),8)
    assert not host.errors and not guest.errors,'Browser console errors (details withheld)'
    host.capture(ROOT/'build/relay-host.png');guest.capture(ROOT/'build/relay-guest.png')
+   # Production helper exposes only selected route metadata, not candidate addresses.
+   for page in [host,guest]:
+    page.evaluate("globalThis.routeDiagnostic=null;EmberConnectionDiagnostics.sample(value=>routeDiagnostic=JSON.parse(value));true")
+    selected=wait_until(lambda:page.evaluate('globalThis.routeDiagnostic'),5)
+    assert selected['local']=='relay' and selected['remote']=='relay',selected
+    wait_until(lambda:page.evaluate('globalThis.testDiagnosticHttp.includes(200)'),12)
+    assert page.evaluate('testDiagnosticHttp.every(status=>status===200)'), 'Diagnostic upload failed'
+   # Force a terminal transport failure and verify automatic report delivery.
+   before=host.evaluate('testDiagnosticHttp.length')
+   host.evaluate('testPeers.at(-1).close();true')
+   wait_until(lambda:host.evaluate('testDiagnosticHttp.length')>before,12)
+   wait_until(lambda:any(page.evaluate("testDiagnosticEvents.includes('failure')") for page in [host,guest]),25)
+   assert all(page.evaluate('testDiagnosticHttp.every(status=>status===200)') for page in [host,guest]), 'Failure report upload failed'
+   print('DIAGNOSTIC UPLOAD AND ROUTE PASS',flush=True)
    print('GODOT LIVE PRIVATE LOBBY RELAY PASS' if lobby else 'GODOT LIVE FORCED RELAY PASS',json.dumps(reports))
    (ROOT/('build/lobby-relay.json' if lobby else 'build/relay.json')).write_text(json.dumps({'result':'pass','lobby':lobby,'reports':reports},indent=2)+'\n')
   finally:

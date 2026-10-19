@@ -5,10 +5,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 ROOT=Path(__file__).resolve().parents[1]
 from browser_cdp import CDP, QuietHandler
-parser=argparse.ArgumentParser();parser.add_argument('--url');parser.add_argument('--connection-setup',action='store_true');parser.add_argument('--animation-check',action='store_true');parser.add_argument('--clipboard-check',action='store_true');args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--url');parser.add_argument('--ice-diagnostics-check',action='store_true');parser.add_argument('--connection-setup',action='store_true');parser.add_argument('--animation-check',action='store_true');parser.add_argument('--clipboard-check',action='store_true');args=parser.parse_args()
 signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(SystemExit(143)))
 (ROOT/'build').mkdir(exist_ok=True)
-server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(QuietHandler,directory=str(ROOT/'build/web')))
+server=http.server.ThreadingHTTPServer(('127.0.0.1',27841 if args.ice_diagnostics_check else 0),functools.partial(QuietHandler,directory=str(ROOT/'build/web')))
 threading.Thread(target=server.serve_forever,daemon=True).start()
 origin=args.url or f'http://127.0.0.1:{server.server_port}'
 with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'build/browser-console.log').open('w') as log:
@@ -33,6 +33,29 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
   assert ready and ready['live']==1 and ready['views'][0]['tick']>0,ready
   page.capture(ROOT/'build/web-onboarding.png')
   assert page.evaluate("""(()=>{const h=EmberCoreWeb.create();try{return [NaN,Infinity,-Infinity,0.5,4294967298,'2',null].every(op=>EmberCoreWeb.command(h,op,0,0)===-2)&&EmberCoreWeb.command(h,1,4294967296,0)===-2&&EmberCoreWeb.command(h,1,0,4294967296)===-2&&EmberCoreWeb.command(h,10,0,0)===0&&EmberCoreWeb.command(0,2,0,0)===-1;}finally{EmberCoreWeb.destroy(h)}})()"""),'Web ABI silently narrowed invalid arguments'
+
+  if args.ice_diagnostics_check:
+   page.evaluate("""globalThis.failedIceEvents=[];globalThis.failedIceProbe=new RTCPeerConnection({iceServers:[{urls:'stun:ice-diagnostics.invalid:19302'}]});globalThis.failedIceNativeErrors=[];failedIceProbe.addEventListener('icecandidateerror',e=>failedIceNativeErrors.push(e.errorCode));failedIceProbe.createDataChannel('diagnostic-probe');failedIceProbe.createOffer().then(offer=>failedIceProbe.setLocalDescription(offer));true""")
+   for _ in range(200):
+    page.evaluate("failedIceEvents.push(...JSON.parse(EmberConnectionDiagnostics.drain()));true")
+    if page.evaluate("failedIceEvents.some(e=>e.event==='ice_error'&&e.code===701)||(failedIceProbe.iceGatheringState==='complete'&&failedIceEvents.some(e=>e.event==='ice_candidates'&&e.host+e.srflx+e.prflx+e.relay===0))"):break
+    time.sleep(.1)
+   assert page.evaluate("failedIceEvents.some(e=>e.event==='ice_error'&&e.code===701)||(failedIceProbe.iceGatheringState==='complete'&&failedIceEvents.some(e=>e.event==='ice_candidates'&&e.host+e.srflx+e.prflx+e.relay===0))"),'Expected unreachable ICE server or no usable candidates'
+   page.evaluate("EmberConnectionDiagnostics.sample(()=>{});true");time.sleep(.2)
+   page.evaluate("failedIceEvents.push(...JSON.parse(EmberConnectionDiagnostics.drain()));true")
+   events=page.evaluate('failedIceEvents')
+   assert any(e['event']=='ice_stats' for e in events),'No stats for unconnected peer'
+   assert 'ice-diagnostics.invalid' not in json.dumps(events),'Private server address leaked'
+   assert all(not any(k in e for k in ['url','address','errorText','port']) for e in events),'Private ICE metadata leaked'
+   diagnostic_id=__import__('secrets').token_hex(8)
+   token=json.loads((Path.home()/'.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
+   events.append({'event':'failure','reason':'gathering'})
+   report={'version':1,'build':'diagnostics-v2','attempt':diagnostic_id,'events':[dict(e,seq=i+1,ms=i,role='client') for i,e in enumerate(events[-64:])]}
+   status=page.evaluate("(async()=>{const r=await fetch('https://ember-coop-credentials.ember-bridge-playtests.workers.dev/v1/diagnostics',{method:'POST',headers:{'Authorization':'Bearer '+"+json.dumps(token)+",'Content-Type':'application/json'},body:"+json.dumps(json.dumps(report))+"});return r.status})()")
+   assert status==200,{'diagnostic_upload_status':status}
+   (ROOT/'build/failed-ice-browser.json').write_text(json.dumps({'result':'pass','attempt':diagnostic_id,'events':events},indent=2)+'\n')
+   page.evaluate('failedIceProbe.close();EmberConnectionDiagnostics.reset();true')
+   print('REAL FAILED ICE DIAGNOSTICS PASS',flush=True)
 
   if args.clipboard_check:
    parsed=urlparse(origin)
@@ -76,6 +99,26 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
     assert page.evaluate("pasteResult==='public-paste-probe' && !document.querySelector('[role=dialog]')"),'Native paste input/cleanup failed'
    page.evaluate("globalThis.pasteResult=null;EmberClipboard.paste('Cancel probe',value=>pasteResult=value);EmberClipboard.cancel();true")
    assert page.evaluate("pasteResult==='' && !document.querySelector('[role=dialog]')"),'Cancelled paste retained'
+   page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
+   page.click(160,283)
+   time.sleep(.15)
+   assert page.evaluate("document.activeElement===document.querySelector('input[data-ember-paste][type=password]')"),'Access key did not open masked native entry'
+   page.capture(ROOT/'build/access-key-entry.png')
+   page.call('Input.insertText',{'text':'public-access-probe'})
+   page.evaluate("globalThis.detachedEntry=document.querySelector('[data-ember-paste]');true")
+   page.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'Enter','code':'Enter','windowsVirtualKeyCode':13})
+   page.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'Enter','code':'Enter','windowsVirtualKeyCode':13})
+   assert page.evaluate("!document.querySelector('[role=dialog]') && detachedEntry.value===''")
+   page.click(160,283)
+   time.sleep(.15)
+   assert page.evaluate("document.querySelector('[data-ember-paste]').value==='public-access-probe'"),'Native entry did not update Godot key'
+   page.evaluate('EmberClipboard.cancel();true')
+   page.evaluate("globalThis.roomResult=null;EmberClipboard.paste('Room name',value=>roomResult=value,'Co-op room',32,false);true")
+   assert page.evaluate("document.activeElement.type==='text' && document.activeElement.maxLength===32 && document.activeElement.selectionEnd===10")
+   page.call('Input.insertText',{'text':'Pasted room'})
+   page.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'Enter','code':'Enter','windowsVirtualKeyCode':13})
+   page.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'Enter','code':'Enter','windowsVirtualKeyCode':13})
+   assert page.evaluate("roomResult==='Pasted room' && !document.querySelector('[role=dialog]')")
    page.evaluate("Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:globalThis.nativeWrite});true")
    page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
    print('BROWSER CLIPBOARD FALLBACK PASS: 1920,1280,960,854; real copy, focus, cancel and cleanup')

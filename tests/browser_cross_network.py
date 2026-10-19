@@ -7,7 +7,7 @@ This script never creates or deletes cloud resources.
 import argparse,json,signal,subprocess,sys,tempfile,time,urllib.request
 from pathlib import Path
 from browser_cdp import CDP
-from browser_relay import INSTRUMENT,wait_until,type_text,key
+from browser_relay import INSTRUMENT,wait_until,type_text,key,enter_code
 ROOT=Path(__file__).resolve().parents[1]
 URL='https://rareskey.github.io/coop-side-scroller/'
 COPY_CAPTURE="""(()=>{const original=EmberClipboard;globalThis.testCopied='';globalThis.EmberClipboard={cancel:()=>original.cancel(),paste:(...a)=>original.paste(...a),copy:(text,done)=>{testCopied=text;done(true)}};return true})()"""
@@ -54,7 +54,7 @@ def run():
    for page in [host,guest]:
     wait_until(lambda:page.evaluate('globalThis.EmberCoreWeb?.diagnostics().calls>120'),90)
     page.evaluate(COPY_CAPTURE)
-    page.click(160,283);type_text(page,token)
+    page.click(160,283);enter_code(page,token)
     page.click(180,317);page.click(160,378);page.click(160,354)
    stage='host invitation';print('BOTH BROWSERS CONFIGURED',flush=True);host.click(160,387)
    wait_until(lambda:host.evaluate('testPeers.at(-1)?.iceGatheringState==="complete"'),30)

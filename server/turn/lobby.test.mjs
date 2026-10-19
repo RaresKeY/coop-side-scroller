@@ -26,9 +26,10 @@ Deno.test('Atomic two-player join, idempotent creation, safe listing and seat ow
  const list=(await f.call({action:'list'}))[1];check(list.rooms.length===1);check(!JSON.stringify(list).includes(host));
  const joins=await Promise.all([guest,third].map(seat=>f.call({action:'join',id:room.id,seat})));
  check(joins.filter(r=>r[0]===200).length===1&&joins.filter(r=>r[0]===409).length===1);
+ const rejectedSeat=joins[0][0]===409?guest:third;
  check((await f.call({action:'list'}))[1].rooms.length===0);
- check((await f.call({action:'sync',id:room.id,seat:third}))[0]===403);
- check((await f.call({action:'leave',id:room.id,seat:third}))[0]===403);
+ check((await f.call({action:'sync',id:room.id,seat:rejectedSeat}))[0]===403);
+ check((await f.call({action:'leave',id:room.id,seat:rejectedSeat}))[0]===403);
 });
 Deno.test('Offer/answer automatic exchange validates role/session and purges after both ready',async()=>{
  const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Friends'}))[1];
@@ -43,7 +44,7 @@ Deno.test('Offer/answer automatic exchange validates role/session and purges aft
  check((await sync(host,{signal:signal('offer','c'.repeat(32))}))[0]===409);
  check((await sync(host,{ready:true}))[1].complete===false);
  check((await sync(guest,{ready:true}))[1].complete===true);
- check((await sync(host))[0]===404);check(f.store.size===0);check(f.alarm()===null);
+ check((await sync(host))[0]===404);check([...f.store.keys()].filter(k=>k.startsWith('room:')).length===0);check(f.alarm()!==null);
 });
 Deno.test('Malformed/oversized signals, capacity, lease expiry, alarm cleanup and explicit leave',async()=>{
  const f=fixture();let room;
@@ -51,7 +52,7 @@ Deno.test('Malformed/oversized signals, capacity, lease expiry, alarm cleanup an
  check((await f.call({action:'create',seat:'f'.repeat(32),name:'Full'}))[0]===429);
  check((await f.call({action:'sync',id:room.id,seat:(32).toString(16).padStart(32,'0'),signal:'x'.repeat(70000)}))[0]===400);
  for(const r of f.store.values())r.hostSeen=0;
- await f.object.alarm();check(f.store.size===0);check(f.alarm()===null);
+ await f.object.alarm();check([...f.store.keys()].filter(k=>k.startsWith('room:')).length===0);check(f.alarm()!==null);
  room=(await f.call({action:'create',seat:host,name:'Leave'}))[1];
  check((await f.call({action:'leave',id:room.id,seat:host}))[0]===200);
  check((await f.call({action:'list'}))[1].rooms.length===0);
@@ -65,7 +66,7 @@ Deno.test('Guest lease and absolute setup lifetime expire even while host renews
   const stored=f.store.get('room:'+room.id);
   if(kind==='guest')stored.guestSeen=0;else stored.expires=0;
   check((await f.call({action:'sync',id:room.id,seat:host}))[0]===404);
-  check(f.store.size===0);
+  check([...f.store.keys()].filter(k=>k.startsWith('room:')).length===0);
  }
 });
 Deno.test('Lobby preflight, shared limit and unavailable directory are bounded and redacted',async()=>{
@@ -89,7 +90,8 @@ Deno.test('32 rooms with large valid offer/answer messages fit individual SQLite
   check((await f.call({action:'sync',id:room.id,seat,signal:offer}))[0]===200);
   check((await f.call({action:'sync',id:room.id,seat:other,signal:answer}))[0]===200);
  }
- check(f.store.size===32);check([...f.store.values()].reduce((n,r)=>n+r.offer.length+r.answer.length,0)>2000000);
+ const rooms=[...f.store].filter(([k])=>k.startsWith('room:')).map(([,r])=>r);
+ check(rooms.length===32);check(rooms.reduce((n,r)=>n+r.offer.length+r.answer.length,0)>2000000);
 });
 Deno.test('Initial single-value records migrate without losing reserved seats or signals',async()=>{
  const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Existing'}))[1];
@@ -99,4 +101,24 @@ Deno.test('Initial single-value records migrate without losing reserved seats or
  check(!f.store.has('rooms')&&f.store.has('room:'+room.id));
  check((await f.call({action:'join',id:room.id,seat:guest}))[0]===200);
  check((await f.call({action:'sync',id:room.id,seat:guest}))[1].signal===signal('offer'));
+});
+Deno.test('Operator journal read, browser isolation and correlated room cleanup',async()=>{
+ const f=fixture();f.env.DIAGNOSTIC_READ_TOKEN='operator-only';f.env.DIAGNOSTIC_LIMIT={limit:()=>({success:true})};f.env.DIAGNOSTIC_TOTAL={limit:()=>({success:true})};
+ const send=async(body,token='operator-only')=>{
+  const response=await handle(new Request('https://issuer.example/v1/diagnostics',{method:'POST',headers:{Origin:'https://rareskey.github.io',Authorization:'Bearer '+token},body:JSON.stringify(body)}),f.env);
+  return [response.status,await response.json()];
+ };
+ const report={version:1,build:'diagnostics-v1',attempt:'a'.repeat(16),events:[{event:'begin',ms:0,role:'solo'}]};
+ check((await send(report,'test-private'))[0]===200);
+ const [status,value]=await send({version:1,action:'read'});
+ check(status===200,JSON.stringify(value));check(value.events.length===1,'Upload not retained');
+ check((await send({action:'read'},'test-private'))[0]===400,'Playtester read journal');
+});
+Deno.test('Diagnostic journal bounds, expiry and reserved-action isolation',async()=>{
+ const f=fixture();
+ for(let i=0;i<270;i++)await f.object.fetch(new Request('https://diagnostics.internal/',{method:'POST',body:JSON.stringify({action:'diagnostics_record',entry:{kind:'lobby',attempt:'a'.repeat(16),status:404}})}));
+ check(f.store.get('diagnostics').length===256,'Journal count bound failed');
+ check((await f.call({action:'diagnostics_read'}))[0]===400,'Reserved journal action exposed');
+ f.store.set('diagnostics',[{kind:'lobby',at:Date.now()-8*86400000}]);
+ await f.object.alarm();check(!f.store.has('diagnostics'),'Old diagnostics retained');
 });

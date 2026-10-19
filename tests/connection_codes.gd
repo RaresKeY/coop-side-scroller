@@ -142,7 +142,12 @@ func scene_checks():
  scene.rtc_update(120001)
  check(scene.rtc == connected,"Established connection skipped disconnect grace")
  scene.rtc_fail("Connection test failure")
- check(scene.mode == "solo" and scene.setup_menu.visible and scene.status.text == "Connection test failure","Failure did not return to setup")
+ check(scene.mode == "solo" and scene.setup_menu.visible and scene.status.text.begins_with("Connection test failure"),"Failure did not return to setup")
+ scene.diagnostics.begin()
+ for i in range(100): scene.diagnostics.record("rtc",{"state":i % 6})
+ check(scene.diagnostics.events.size()==64,"Diagnostic buffer is not bounded")
+ check(scene.diagnostics.events[0].seq==38,"Diagnostic event sequence lost")
+ check(not scene.diagnostics.report().contains("Bearer"),"Diagnostic report contains authorization")
  # Cancelling a lobby entry while HTTP is in flight must not resurrect it.
  var canvas = scene.lobby.panel.get_parent()
  scene.lobby.panel.free()
@@ -151,6 +156,9 @@ func scene_checks():
  scene.add_child(fake_lobby)
  fake_lobby.setup(scene,canvas)
  fake_lobby.set_process(false)
+ check(fake_lobby.service_error(404,"room_expired").contains("HTTP 404 · room_expired"),"Missing room error diagnostic")
+ check(fake_lobby.service_error(409,"session_mismatch").contains("HTTP 409 · session_mismatch"),"Missing signaling conflict diagnostic")
+ check(not fake_lobby.service_error(500,"private response body").contains("private response body"),"Untrusted service response exposed")
  scene.lobby = fake_lobby
  fake_lobby.active = true
  fake_lobby.response = {"version":1,"id":"ABCDEF12","role":"client"}
@@ -174,6 +182,56 @@ func scene_checks():
  fake_lobby.sync_room()
  fake_lobby.complete_request.emit()
  check(scene.rtc == live_peer and not fake_lobby.active and not fake_lobby.panel.visible,"Signaling cleanup terminated connected gameplay")
+ # ICE may finish after sync starts but before a missing-room response arrives.
+ fake_lobby.active = true
+ fake_lobby.panel.show()
+ fake_lobby.failures = 2
+ live_peer.state = WebRTCPeerConnection.STATE_CONNECTING
+ fake_lobby.sync_room()
+ live_peer.state = WebRTCPeerConnection.STATE_CONNECTED
+ fake_lobby.complete_request.emit()
+ check(scene.rtc == live_peer and not fake_lobby.active and not fake_lobby.panel.visible,"In-flight signaling cleanup terminated newly connected gameplay")
+ # Once established, lobby cleanup must not shorten the ICE recovery grace.
+ # A sync sent while connected can finish during a brief disconnection.
+ scene.local_signal = {"sdp":"v=0", "ice":[]}
+ scene.signal_finished = true
+ scene.mode = "client"
+ fake_lobby.active = true
+ fake_lobby.failures = 2
+ live_peer.state = WebRTCPeerConnection.STATE_CONNECTED
+ fake_lobby.sync_room()
+ live_peer.state = WebRTCPeerConnection.STATE_DISCONNECTED
+ scene.rtc_update(120000)
+ fake_lobby.complete_request.emit()
+ check(scene.rtc == live_peer and not fake_lobby.active,"Lobby error bypassed established transport disconnect grace")
+ # A successful but incomplete acknowledgement also retains establishment
+ # across polls; the next request can start during a temporary interruption.
+ if scene.rtc == live_peer:
+  fake_lobby.active = true
+  fake_lobby.response = {"version":1,"complete":false}
+  live_peer.state = WebRTCPeerConnection.STATE_CONNECTED
+  fake_lobby.sync_room()
+  fake_lobby.complete_request.emit()
+  fake_lobby.response = {"error":"Room closed"}
+  fake_lobby.failures = 2
+  live_peer.state = WebRTCPeerConnection.STATE_DISCONNECTED
+  fake_lobby.sync_room()
+  fake_lobby.complete_request.emit()
+  check(scene.rtc == live_peer and not fake_lobby.active,"Lobby forgot established transport between sync polls")
+  scene.rtc_update(131001)
+  check(scene.rtc == null,"Established lobby bypassed terminal disconnect timeout")
+ check(not fake_lobby.transport_established,"Lobby close retained establishment for the next attempt")
+ # Before the first connection, setup still fails after three sync errors.
+ var unconnected = FakeRTC.new()
+ unconnected.state = WebRTCPeerConnection.STATE_CONNECTING
+ scene.rtc = unconnected
+ fake_lobby.active = true
+ fake_lobby.room_id = "ABCDEF12"
+ fake_lobby.failures = 2
+ fake_lobby.response = {"error":"Room closed"}
+ fake_lobby.sync_room()
+ fake_lobby.complete_request.emit()
+ check(scene.rtc == null and not fake_lobby.active,"Unestablished setup ignored its sync failure limit")
  fake_lobby.room_id = "" # Fixture cleanup needs no HTTP leave.
  scene.solo()
  print("CONNECTION CODE/SETUP TEST ","FAIL" if failed else "PASS")

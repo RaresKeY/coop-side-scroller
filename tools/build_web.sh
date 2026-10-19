@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+COMMON_DIR="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)"
+exec 9>"$COMMON_DIR/web-publication.lock"
+flock -w 1200 9
 python3 "$ROOT/tools/build_core.py"
 mkdir -p "$ROOT/build/web"
 touch "$ROOT/build/.gdignore"

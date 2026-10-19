@@ -10,6 +10,7 @@ Ember Bridge is a two-player, host-authoritative co-op prototype built around an
 | `adapters/godot/` | Native C-interface GDExtension and GDScript facade | Calls the same core API on native and Web targets |
 | `adapters/web/ember_core_bridge.js` | Separate core Wasm boot/bridge and browser-native text/copy dialogs | Godot and core Wasm memories remain separate |
 | `src/main.gd`, `src/character_view.gd` | Fixed-tick scheduling, input capture, menus, rendering, sprite playback, transport and diagnostics | Supplies inputs/ticks, sends opaque messages, consumes core views/events |
+| `src/diagnostics.gd` | Bounded browser connection events, best-effort uploads and copyable reports | Adapter-only; sanitized journal in existing Worker/DO |
 | `src/private_lobby.gd`, `src/relay_credentials.gd`, `src/connection_codes.gd` | HTTP setup, credential validation and versioned signaling envelopes | Connection metadata stays outside the core |
 | `server/turn/worker.mjs` | Playtest-key authorization, temporary ICE issuance, private room directory/signaling | `/v1/ice` and `/v1/lobby`; one SQLite Durable Object holds bounded setup records |
 | Cloudflare TURN | Forwarding encrypted WebRTC traffic when selected | No simulation or gameplay authority |

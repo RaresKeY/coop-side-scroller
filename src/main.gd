@@ -56,6 +56,7 @@ var pairing_hint: Label
 var pairing_copy: Button
 var pairing_paste: Button
 var pairing_retry: Button
+var text_entry_callback
 var clipboard_callback
 var clipboard_copy_callback
 var clipboard_copy_pending := false
@@ -64,6 +65,7 @@ var requested_address := "127.0.0.1"
 var capture_at := -1.0
 var test_mode := ""
 var lobby
+var diagnostics
 var camera: Camera2D
 var test_partner_seen := false
 
@@ -151,6 +153,7 @@ func _ready():
  relay_access.placeholder_text = "Private playtest access code"
  relay_access.secret = true
  relay_setup.add_child(relay_access)
+ bind_browser_entry(relay_access,"Private playtest access code",128,true)
  connection_route = OptionButton.new()
  for route_title in ["Direct + relay fallback","Relay only (test)","Direct only (no relay)"]: connection_route.add_item(route_title)
  relay_setup.add_child(connection_route)
@@ -221,6 +224,14 @@ func _ready():
  # DOM text field so nested remote desktops need no Clipboard API permission.
  signal_out.visible = false
  signal_in.visible = false
+ diagnostics = preload("res://src/diagnostics.gd").new()
+ diagnostics.game = self
+ add_child(diagnostics)
+ var diagnostic_copy = Button.new()
+ diagnostic_copy.text = "Copy connection diagnostics"
+ diagnostics.copy_button = diagnostic_copy
+ diagnostic_copy.pressed.connect(diagnostics.copy_report)
+ options.add_child(diagnostic_copy)
  lobby = preload("res://src/private_lobby.gd").new()
  add_child(lobby)
  lobby.setup(self,canvas)
@@ -248,8 +259,8 @@ func _ready():
  multiplayer.peer_connected.connect(peer_joined)
  multiplayer.peer_disconnected.connect(peer_left)
  multiplayer.connected_to_server.connect(func(): signal_panel.hide(); status.text = "Connected • host simulates combat and movement"; connected_at = elapsed)
- multiplayer.connection_failed.connect(func(): solo(); status.text = "Connection failed. Check address / UDP 27840.")
- multiplayer.server_disconnected.connect(func(): solo(); status.text = "Host disconnected • returned to solo")
+ multiplayer.connection_failed.connect(func(): network_ended("Connection failed · retry Private rooms" if OS.has_feature("web") else "Connection failed. Check address / UDP 27840."))
+ multiplayer.server_disconnected.connect(func(): network_ended("Host disconnected • returned to solo"))
 
 func toggle_menu():
  if setup_menu.visible:
@@ -280,7 +291,23 @@ func style_button(button: Button):
   style.content_margin_bottom = 6
   button.add_theme_stylebox_override(pair[0],style)
 
+func network_ended(message: String):
+ if diagnostics != null:
+  diagnostics.capture_ice()
+  diagnostics.sample_transport()
+  diagnostics.record("failure",{"reason":"connection"})
+  diagnostics.flush()
+ solo()
+ status.text = message + (" · diagnostic " + diagnostics.id if diagnostics != null and not diagnostics.id.is_empty() else "")
+
 func rtc_fail(message: String):
+ if diagnostics != null and not diagnostics.id.is_empty():
+  var reason = "timeout" if "timed out" in message else "gathering" if "gather" in message else "description" if "description" in message else "candidate" if "candidate" in message else "relay" if "Relay" in message or "relay" in message else "connection" if "Connection" in message else "other"
+  diagnostics.capture_ice()
+  diagnostics.sample_transport()
+  diagnostics.record("failure",{"reason":reason})
+  diagnostics.flush()
+  message += " · diagnostic " + diagnostics.id
  var in_lobby = lobby != null and not lobby.room_id.is_empty()
  var role = "" if in_lobby else pairing_role
  if in_lobby:
@@ -327,6 +354,8 @@ func request_relay_credentials(generation: int) -> Dictionary:
  if reply[0] != HTTPRequest.RESULT_SUCCESS:
   rtc_fail("Relay endpoint unavailable • check network and retry")
   return {}
+ if diagnostics != null:
+  diagnostics.record("http",{"action":"ice","status":int(reply[1]),"code":"ok" if reply[1] == 200 else "relay_provider_failed"})
  if reply[1] != 200:
   rtc_fail("Relay access invalid or expired" if reply[1] in [401,403] else "Too many attempts • wait a minute" if reply[1]==429 else "Relay service unavailable • retry later")
   return {}
@@ -341,6 +370,8 @@ func rtc_begin(server: bool, session: String = "") -> bool:
  if rtc_issuing:
   status.text = "Getting relay access • please wait"
   return false
+ if diagnostics != null and (lobby == null or not lobby.active): diagnostics.begin()
+ diagnostics.record("rtc_begin",{"role":"host" if server else "client","route":connection_route.selected})
  reset_network()
  var generation = connection_generation
  rtc_route_mode = connection_route.selected
@@ -389,6 +420,23 @@ func bind_rtc_callbacks(generation: int):
  rtc.ice_candidate_created.connect(func(media, index, candidate):
   if generation != connection_generation or rtc == null: return
   local_signal.ice.append([media,index,candidate])
+ )
+
+# Keep browser text entry in a real DOM control: native paste, IME and passwords.
+func bind_browser_entry(field: LineEdit, title: String, limit: int, secret := false):
+ if not OS.has_feature("web"): return
+ field.editable = false
+ field.tooltip_text = "Click or press Enter to type or paste"
+ field.gui_input.connect(func(event):
+  if (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed) or (event is InputEventKey and event.pressed and event.keycode in [KEY_ENTER,KEY_KP_ENTER,KEY_SPACE]):
+   field.accept_event()
+   var helper = JavaScriptBridge.get_interface("EmberClipboard")
+   if helper == null: return
+   text_entry_callback = JavaScriptBridge.create_callback(func(args):
+    if args.size() > 0 and str(args[0]) != "": field.text = str(args[0])
+    field.grab_focus()
+   )
+   helper.paste(title,text_entry_callback,field.text,limit,secret)
  )
 
 func paste_signal():
@@ -556,6 +604,10 @@ func _exit_tree():
  if core != null: core.close()
 
 func solo():
+ if diagnostics != null and not diagnostics.id.is_empty():
+  diagnostics.capture_ice()
+  diagnostics.record("leave")
+  diagnostics.flush()
  if lobby != null: lobby.close()
  setup_menu.hide()
  signal_panel.hide()

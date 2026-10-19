@@ -17,6 +17,7 @@ var seat := ""
 var role := ""
 var accepted := false
 var published := false
+var transport_established := false
 var failures := 0
 var listed_rooms := ""
 
@@ -38,6 +39,7 @@ func setup(owner_game, canvas):
  room_name.text = "Co-op room"
  room_name.max_length = 32
  panel.add_child(room_name)
+ game.bind_browser_entry(room_name,"Room name",32)
  create_button = Button.new()
  create_button.text = "Create room"
  create_button.custom_minimum_size.y = 36
@@ -63,6 +65,7 @@ func request_data(data: Dictionary, request_generation: int) -> Dictionary:
  request.max_redirects = 0
  add_child(request)
  data.version = 1
+ if game.diagnostics != null: data.diagnostic = game.diagnostics.id
  var error = request.request(ENDPOINT,["Authorization: Bearer "+game.relay_access.text.strip_edges(),"Content-Type: application/json"],HTTPClient.METHOD_POST,JSON.stringify(data))
  if error != OK:
   request.queue_free()
@@ -70,13 +73,30 @@ func request_data(data: Dictionary, request_generation: int) -> Dictionary:
  var response = await request.request_completed
  request.queue_free()
  if request_generation != generation: return {}
- if response[0] != HTTPRequest.RESULT_SUCCESS: return {"error":"Network unavailable"}
+ if response[0] != HTTPRequest.RESULT_SUCCESS:
+  if game.diagnostics != null:
+   game.diagnostics.record("http",{"action":str(data.get("action","unknown")),"status":-1,"code":"unknown_error"})
+   game.diagnostics.flush()
+  return {"error":"Network unavailable"}
  var value = JSON.parse_string(response[3].get_string_from_utf8())
  if not value is Dictionary: return {"error":"Room service unavailable"}
+ if game.diagnostics != null:
+  game.diagnostics.record("http",{"action":str(data.get("action","unknown")),"status":int(response[1]),"code":safe_code(value.get("error","ok"))})
  if response[1] != 200:
-  return {"error":"Access code invalid or expired" if response[1] in [401,403] else "Too many requests; wait a minute" if response[1]==429 else "Room full, closed or expired; refresh and try again" if response[1] in [404,409] else "Room service unavailable"}
+  if game.diagnostics != null: game.diagnostics.flush()
+  return {"error":service_error(response[1],value.get("error","unknown_error"))}
  if value.get("version") != 1: return {"error":"Incompatible room service"}
  return value
+
+# Display only bounded machine codes, never arbitrary response bodies or secrets.
+func safe_code(code) -> String:
+ var known = ["access_denied","origin_denied","rate_limited","limiter_unavailable","issuer_not_configured","lobby_not_configured","lobby_unavailable","invalid_lobby_request","relay_provider_failed","room_expired","room_full","own_room","signal_already_set","session_mismatch","seat_denied","invitation_expired","invalid_request","invalid_seat","invalid_room","invalid_name","invalid_signal","invalid_ready","rooms_full"]
+ return str(code) if code is String and (code in known or code == "ok") else "unknown_error"
+
+func service_error(status: int, code) -> String:
+ var reason = safe_code(code)
+ var message = "Access code invalid or expired" if status in [401,403] else "Too many requests; wait a minute" if status == 429 else "Room full, closed or expired; refresh and try again" if status in [404,409] else "Room service unavailable"
+ return "%s (HTTP %d · %s)" % [message,status,reason]
 
 func open():
  game.solo()
@@ -86,6 +106,7 @@ func open():
   game.status.text = "Enter your private playtest access code first"
   game.relay_access.grab_focus()
   return
+ game.diagnostics.begin()
  active = true
  panel.show()
  room_name.show()
@@ -164,12 +185,14 @@ func enter_room(action: String, id: String = ""):
  role = result.role
  accepted = false
  published = false
+ transport_established = false
  failures = 0
  clear_rows()
  room_name.hide()
  create_button.hide()
  refresh_button.hide()
- hint.text = "Room %s · waiting for partner…" % room_id
+ game.diagnostics.record("room",{"room":room_id,"role":role})
+ hint.text = "Room %s · waiting for partner… · diagnostic %s" % [room_id,game.diagnostics.id]
  game.pairing_role = role
  game.status.text = "Preparing private room…"
  busy = true
@@ -178,7 +201,14 @@ func enter_room(action: String, id: String = ""):
  busy = false
  next_poll = 0
 
+func remember_connection():
+ # Room readiness is sticky on the server; retain it here as well. A brief
+ # ICE interruption must not make an established game depend on setup again.
+ if game.rtc != null and game.rtc.get_connection_state() == WebRTCPeerConnection.STATE_CONNECTED:
+  transport_established = true
+
 func _process(_dt):
+ if active: remember_connection()
  if not active or busy or Time.get_ticks_msec()<next_poll: return
  if room_id.is_empty():
   if panel.visible: refresh()
@@ -187,26 +217,29 @@ func _process(_dt):
 func sync_room():
  busy = true
  var attempt = generation
- var connected = game.rtc != null and game.rtc.get_connection_state() == WebRTCPeerConnection.STATE_CONNECTED
+ remember_connection()
  var signal_code = game.signal_out.text if game.signal_finished and not published else ""
- var result = await request_data({"action":"sync","id":room_id,"seat":seat,"signal":signal_code,"ready":connected},attempt)
+ var result = await request_data({"action":"sync","id":room_id,"seat":seat,"signal":signal_code,"ready":transport_established},attempt)
  if attempt != generation: return
+ # ICE can connect while HTTP is in flight, then temporarily disconnect.
+ # Keep established sessions under the transport's own liveness deadlines.
+ remember_connection()
  busy = false
  next_poll = Time.get_ticks_msec()+2000
  if result.has("error"):
   # A connected game no longer depends on its signaling room. The other peer
   # may already have completed cleanup; never tear gameplay down for this.
-  if connected:
+  if transport_established:
    active = false
    panel.hide()
    return
   failures += 1
-  hint.text = result.error + " · retrying…"
-  if failures >= 3: game.rtc_fail("Room setup failed · open Private rooms and retry")
+  hint.text = result.error + " · diagnostic " + game.diagnostics.id + " · retrying…"
+  if failures >= 3: game.rtc_fail("Room setup failed: " + str(result.error) + " · open Private rooms and retry")
   return
  failures = 0
  if not signal_code.is_empty(): published = true
- if connected:
+ if transport_established:
   panel.hide()
   # Continue briefly until both peers acknowledge; the server clears signals.
   if result.get("complete",false): active = false
@@ -236,6 +269,7 @@ func close():
  role = ""
  accepted = false
  published = false
+ transport_established = false
  panel.hide()
  listed_rooms = ""
  clear_rows()

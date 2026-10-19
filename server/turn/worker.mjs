@@ -37,40 +37,66 @@ async function readBounded(response) {
  for(const part of chunks){bytes.set(part,offset);offset+=part.length;}
  return JSON.parse(new TextDecoder().decode(bytes));
 }
-export async function handle(request,env,fetcher=(url,options)=>fetch(url,options)) {
+async function handleRequest(request,env,fetcher=(url,options)=>fetch(url,options)) {
  const origin=request.headers.get('Origin');
  const headers={'Cache-Control':'no-store, private','Vary':'Origin','Content-Type':'application/json','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
  const reply=(status,error,extra={})=>Response.json({error,...extra},{status,headers});
  if(!ORIGINS.has(origin))return reply(403,'origin_denied');
  headers['Access-Control-Allow-Origin']=origin;
+ const diagnostic=new URL(request.url).pathname==='/v1/diagnostics';
  const lobby=new URL(request.url).pathname==='/v1/lobby';
- if(!lobby && new URL(request.url).pathname!=='/v1/ice')return reply(404,'not_found');
+ if(!diagnostic && !lobby && new URL(request.url).pathname!=='/v1/ice')return reply(404,'not_found');
  if(request.method==='OPTIONS') {
   if(request.headers.get('Access-Control-Request-Method')!=='POST')return reply(405,'method_denied');
   const requested=(request.headers.get('Access-Control-Request-Headers')||'').toLowerCase().split(',').map(s=>s.trim()).filter(Boolean);
-  if(requested.some(h=>h!=='authorization' && !(lobby && h==='content-type')))return reply(403,'headers_denied');
-  return new Response(null,{status:204,headers:{...headers,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':lobby?'Authorization, Content-Type':'Authorization','Access-Control-Max-Age':'600'}});
+  if(requested.some(h=>h!=='authorization' && !((lobby||diagnostic) && h==='content-type')))return reply(403,'headers_denied');
+  return new Response(null,{status:204,headers:{...headers,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':(lobby||diagnostic)?'Authorization, Content-Type':'Authorization','Access-Control-Max-Age':'600'}});
  }
  if(request.method!=='POST')return reply(405,'method_denied');
  if(!env.TURN_KEY_ID || !env.TURN_KEY_TOKEN || !env.PLAYTEST_TOKEN || !env.ISSUE_LIMIT || !env.TOTAL_LIMIT)return reply(503,'issuer_not_configured');
  // Per-IP limits mitigate unauthenticated attempts; shared invitation limit bounds use.
  try {
-  const limiter=lobby?env.LOBBY_LIMIT:env.ISSUE_LIMIT;
+  const limiter=diagnostic?env.DIAGNOSTIC_LIMIT:lobby?env.LOBBY_LIMIT:env.ISSUE_LIMIT;
   if(!limiter)return reply(503,'limiter_unavailable');
   if(!(await limiter.limit({key:`ip:${request.headers.get('CF-Connecting-IP')||'unknown'}`})).success)return reply(429,'rate_limited');
  } catch {return reply(503,'limiter_unavailable');}
  const authorization=request.headers.get('Authorization')||'';
- if(authorization.length>512 || !authorization.startsWith('Bearer ') || !await equalSecret(authorization.slice(7),env.PLAYTEST_TOKEN))return reply(401,'access_denied');
+ const operator=diagnostic && env.DIAGNOSTIC_READ_TOKEN && await equalSecret(authorization.slice(7),env.DIAGNOSTIC_READ_TOKEN);
+ if(authorization.length>512 || !authorization.startsWith('Bearer ') || (!operator && !await equalSecret(authorization.slice(7),env.PLAYTEST_TOKEN)))return reply(401,'access_denied');
  const now=Math.floor(Date.now()/1000);
  if(!Number.isSafeInteger(Number(env.INVITE_EXPIRES_AT)) || now>=Number(env.INVITE_EXPIRES_AT))return reply(403,'invitation_expired');
+ if(diagnostic) {
+  try {
+   if(!env.DIAGNOSTIC_TOTAL || !(await env.DIAGNOSTIC_TOTAL.limit({key:'diagnostics'})).success)return reply(429,'rate_limited');
+   const report=await readBounded(request);
+   const stub=env.LOBBIES.get(env.LOBBIES.idFromName('private-playtest-v1'));
+   if(operator){
+    if(report.action!=='read'||(report.attempt!==undefined&&!/^[a-f0-9]{16}$/.test(report.attempt)))return reply(400,'invalid_diagnostics');
+    const result=await stub.fetch(new Request('https://diagnostics.internal/',{method:'POST',body:JSON.stringify({action:'diagnostics_read',attempt:report.attempt})}));
+    return new Response(result.body,{status:result.status,headers});
+   }
+   const clean=diagnosticReport(report);
+   if(!clean)return reply(400,'invalid_diagnostics');
+   console.log({kind:'browser',...clean});
+   const saved=await stub.fetch(new Request('https://diagnostics.internal/',{method:'POST',body:JSON.stringify({action:'diagnostics_record',entry:{kind:'browser',...clean}})}));
+   if(!saved.ok)return reply(503,'diagnostics_unavailable');
+   return Response.json({version:1,accepted:true},{headers});
+  } catch {return reply(400,'invalid_diagnostics');}
+ }
  if(lobby) {
   if(!env.LOBBIES || !env.LOBBY_TOTAL)return reply(503,'lobby_not_configured');
   try {if(!(await env.LOBBY_TOTAL.limit({key:'private-lobbies'})).success)return reply(429,'rate_limited');}
   catch{return reply(503,'limiter_unavailable');}
   let data;try{data=await readBounded(request);}catch{return reply(400,'invalid_lobby_request');}
   try {
+   if(!['list','create','join','sync','leave'].includes(data?.action))return reply(400,'invalid_lobby_request');
    const stub=env.LOBBIES.get(env.LOBBIES.idFromName('private-playtest-v1'));
+   const started=Date.now();
    const result=await stub.fetch(new Request('https://lobby.internal/',{method:'POST',body:JSON.stringify(data)}));
+   const payload=await result.clone().json();
+   const entry={kind:'lobby',action:['list','create','join','sync','leave'].includes(data.action)?data.action:'invalid',attempt:/^[a-f0-9]{16}$/.test(data.diagnostic)?data.diagnostic:'unknown',room:/^[A-F0-9]{8}$/.test(data.id)?data.id:(payload.id||''),status:result.status,code:payload.error||'ok',duration:Date.now()-started};
+   console.log(entry);
+   if(result.status!==200||['create','join','leave'].includes(data.action)||data.signal||data.ready)try{await stub.fetch(new Request('https://diagnostics.internal/',{method:'POST',body:JSON.stringify({action:'diagnostics_record',entry})}));}catch{}
    return new Response(result.body,{status:result.status,headers});
   } catch {return reply(503,'lobby_unavailable');}
  }
@@ -100,6 +126,15 @@ export async function handle(request,env,fetcher=(url,options)=>fetch(url,option
  }
  finally {clearTimeout(timer);}
 }
+export async function handle(request,env,fetcher) {
+ const response=await handleRequest(request,env,fetcher);
+ if(new URL(request.url).pathname==='/v1/ice' && request.method==='POST') {
+  let code='ok';
+  if(response.status!==200){try{code=(await response.clone().json()).error||'unknown_error';}catch{code='unknown_error';}}
+  console.log({kind:'ice',status:response.status,code});
+ }
+ return response;
+}
 export default {fetch:(request,env)=>handle(request,env)};
 
 // One SQLite Durable Object serializes the small private room directory.
@@ -119,6 +154,15 @@ function signalEnvelope(code,role) {
 }
 export class PrivateLobbies {
  constructor(state) {this.state=state;}
+ async cleanupEvent(id,reason) {
+  const entry={kind:'room_cleanup',room:id,reason,at:Date.now()};
+  console.log(entry);
+  const entries=(await this.state.storage.get('diagnostics')||[]).filter(e=>Date.now()-e.at<7*86400000);
+  entries.push(entry);
+  while(entries.length>256||encoder.encode(JSON.stringify(entries)).length>262144)entries.shift();
+  await this.state.storage.put('diagnostics',entries);
+ }
+
  async loadRooms() {
   // Compatibility with the initial single-value prototype; existing sessions
   // survive the first upgrade. Per-room values stay below SQLite's 2 MB cap.
@@ -139,6 +183,7 @@ export class PrivateLobbies {
   for(const key of stored.keys())if(!rooms[key.slice(5)])await this.state.storage.delete(key);
   if(legacy)await this.state.storage.delete('rooms');
   if(Object.keys(rooms).length)await this.state.storage.setAlarm(now+ROOM_IDLE_MS);
+  else if((await this.state.storage.get('diagnostics'))?.length)await this.state.storage.setAlarm(Math.max(now+1000,(await this.state.storage.get('diagnostics'))[0].at+7*86400000));
   else await this.state.storage.deleteAlarm();
  }
  async fetch(request) {
@@ -146,6 +191,19 @@ export class PrivateLobbies {
   // cannot both reserve the guest slot. Failed requests cannot alter the store.
   return this.state.blockConcurrencyWhile(async()=>{
    let data;try{data=await readBounded(request);}catch{return Response.json({error:'invalid_request'},{status:400});}
+   if(data.action==='diagnostics_read'||data.action==='diagnostics_record'){
+    const entries=(await this.state.storage.get('diagnostics')||[]).filter(e=>Date.now()-e.at<7*86400000);
+    if(data.action==='diagnostics_read'){
+     const rooms=new Set(entries.filter(e=>e.attempt===data.attempt).flatMap(e=>[e.room,...(e.events||[]).map(x=>x.room)]).filter(Boolean));
+     return Response.json({version:1,events:entries.filter(e=>!data.attempt||e.attempt===data.attempt||rooms.has(e.room)||(e.events||[]).some(x=>rooms.has(x.room))),limit:256,retentionDays:7});
+    }
+    if(data.action!=='diagnostics_record')return Response.json({error:'invalid_request'},{status:400});
+    entries.push({...data.entry,at:Date.now()});
+    while(entries.length>256||encoder.encode(JSON.stringify(entries)).length>262144)entries.shift();
+    await this.state.storage.put('diagnostics',entries);
+    await this.state.storage.setAlarm(Date.now()+ROOM_IDLE_MS);
+    return Response.json({version:1});
+   }
    return this.apply(data,Date.now());
   });
  }
@@ -154,7 +212,7 @@ export class PrivateLobbies {
   if(!data || typeof data!=='object'||Array.isArray(data)||data.version!==1||!['list','create','join','sync','leave'].includes(data.action))return reply(400,'invalid_request');
   const {rooms,stored,legacy}=await this.loadRooms();
   let pruned=false;
-  for(const [id,room] of Object.entries(rooms))if(now>=room.expires||now-room.hostSeen>=ROOM_IDLE_MS||(room.guest && now-room.guestSeen>=ROOM_IDLE_MS)){delete rooms[id];pruned=true;}
+  for(const [id,room] of Object.entries(rooms))if(now>=room.expires||now-room.hostSeen>=ROOM_IDLE_MS||(room.guest && now-room.guestSeen>=ROOM_IDLE_MS)){await this.cleanupEvent(id,now>=room.expires?'lifetime':now-room.hostSeen>=ROOM_IDLE_MS?'host_lease':'guest_lease');delete rooms[id];pruned=true;}
   const save=()=>this.saveRooms(rooms,stored,legacy,now);
   if(data.action==='list') {
    if(pruned||legacy)await save();
@@ -182,7 +240,7 @@ export class PrivateLobbies {
   }
   const host=data.seat===room.host;
   if(!host && data.seat!==room.guest)return reply(403,'seat_denied');
-  if(data.action==='leave') {delete rooms[data.id];await save();return Response.json({version:1,closed:true});}
+  if(data.action==='leave') {await this.cleanupEvent(data.id,host?'host_leave':'guest_leave');delete rooms[data.id];await save();return Response.json({version:1,closed:true});}
   if(data.ready!==undefined && typeof data.ready!=='boolean')return reply(400,'invalid_ready');
   if(data.signal!==undefined && data.signal!=='') {
    const envelope=signalEnvelope(data.signal,host?'host':'client');
@@ -196,15 +254,45 @@ export class PrivateLobbies {
   if(data.ready)room[host?'hostReady':'guestReady']=true;
   const result={version:1,id:data.id,players:room.guest?2:1,signal:host?room.answer:room.offer,complete:room.hostReady&&room.guestReady};
   // Signaling ends once both browsers are connected. Gameplay keeps running.
-  if(result.complete)delete rooms[data.id];
+  if(result.complete){await this.cleanupEvent(data.id,'connected');delete rooms[data.id];}
   await save();return Response.json(result);
  }
  async alarm() {
   await this.state.blockConcurrencyWhile(async()=>{
    const now=Date.now();
+   const journal=(await this.state.storage.get('diagnostics')||[]).filter(e=>now-e.at<7*86400000);
+   if(journal.length)await this.state.storage.put('diagnostics',journal);else await this.state.storage.delete('diagnostics');
    const {rooms,stored,legacy}=await this.loadRooms();
-   for(const [id,r] of Object.entries(rooms))if(now>=r.expires||now-r.hostSeen>=ROOM_IDLE_MS||(r.guest&&now-r.guestSeen>=ROOM_IDLE_MS))delete rooms[id];
+   for(const [id,r] of Object.entries(rooms))if(now>=r.expires||now-r.hostSeen>=ROOM_IDLE_MS||(r.guest&&now-r.guestSeen>=ROOM_IDLE_MS)){await this.cleanupEvent(id,now>=r.expires?'lifetime':now-r.hostSeen>=ROOM_IDLE_MS?'host_lease':'guest_lease');delete rooms[id];}
    await this.saveRooms(rooms,stored,legacy,now);
   });
  }
+}
+
+export function diagnosticReport(value) {
+ if(!value || value.version!==1 || !['diagnostics-v1','diagnostics-v2'].includes(value.build) || !/^[a-f0-9]{16}$/.test(value.attempt) || !Array.isArray(value.events) || !value.events.length || value.events.length>64)return null;
+ if(Object.keys(value).some(k=>!['version','build','attempt','events'].includes(k)))return null;
+ const actions=['ice','list','create','join','sync','leave','unknown'];
+ const codes=["access_denied","origin_denied","rate_limited","limiter_unavailable","issuer_not_configured","lobby_not_configured","lobby_unavailable","invalid_lobby_request","relay_provider_failed",'ok','unknown_error','room_expired','room_full','own_room','signal_already_set','session_mismatch','seat_denied','invitation_expired','invalid_request','invalid_seat','invalid_room','invalid_name','invalid_signal','invalid_ready','rooms_full'];
+ const shapes={ice_candidates:['host','srflx','prflx','relay'],ice_stats_unavailable:[],ice_state:['gathering','ice'],ice_error:['server','code'],ice_stats:['host','srflx','prflx','relay','pairs','failed','checking','succeeded','requests','responses'],transport:['local','remote','protocol','rtt'],begin:[],leave:[],failure:['reason'],rtc:['state'],visibility:['visible'],summary:['rtt','rx','tx','gaps','actors'],http:['action','status','code'],room:['room'],rtc_begin:['route']};
+ for(const event of value.events) {
+  if(!event || !(event.event in shapes) || !['solo','host','client'].includes(event.role) || !Number.isInteger(event.ms) || event.ms<0 || event.ms>86400000)return null;
+  if(Object.keys(event).some(k=>!['seq','event','ms','role',...shapes[event.event]].includes(k)))return null;
+  for(const [key,v] of Object.entries(event)) {
+   if(['event','ms','role'].includes(key))continue;
+   if(key==='gathering'){if(!['new','gathering','complete','unknown'].includes(v))return null;}
+   else if(key==='ice'){if(!['new','checking','connected','completed','disconnected','failed','closed','unknown'].includes(v))return null;}
+   else if(key==='server'){if(!['stun','turn','turns','unknown'].includes(v))return null;}
+   else if(key==='code'&&event.event==='ice_error'){if(!Number.isInteger(v)||v<0||v>65535)return null;}
+   else if(key==='local'||key==='remote'){if(!['host','srflx','prflx','relay','unknown'].includes(v))return null;}
+   else if(key==='protocol'){if(!['udp','tcp','unknown'].includes(v))return null;}
+   else if(key==='reason'){if(!['timeout','gathering','description','candidate','relay','connection','other'].includes(v))return null;}
+   else if(key==='visible'){if(typeof v!=='boolean')return null;}
+   else if(key==='room'){if(typeof v!=='string'||!/^[A-F0-9]{8}$/.test(v))return null;}
+   else if(key==='action'){if(!actions.includes(v))return null;}
+   else if(key==='code'){if(!codes.includes(v))return null;}
+   else if(!Number.isInteger(v)||v< -1||v>2147483647)return null;
+  }
+ }
+ return {version:1,build:value.build,attempt:value.attempt,events:value.events};
 }
