@@ -1,16 +1,26 @@
-# Ember Bridge — portable co-op core and Godot prototype
+# Ember Bridge — portable co-op prototype
 
-[Play in browser](https://rareskey.github.io/coop-side-scroller/) · [Public source](https://github.com/RaresKeY/coop-side-scroller)
+[Play in browser](https://rareskey.github.io/coop-side-scroller/) · [Public source](https://github.com/RaresKeY/coop-side-scroller) · [Architecture](specs/architecture.md) · [Specs index](specs/_readme.md)
 
-An engine-independent C++17 co-op core with a versioned C ABI, native and WebAssembly builds, and a working Godot 4.7 reference game. Simulation, movement/combat, inputs, automatic animation states/events, host authority and binary snapshot synchronization live in `core/`. Rendering, clocks, captured controls, assets and transport stay in adapters. No STL or C++ exceptions cross the ABI.
+A two-player side-scroller with an engine-independent C++17 simulation and a Godot 4.7 reference game. The core owns movement/combat, inputs, automatic animation states, host authority and snapshots behind a versioned C ABI. Adapters own rendering, controls, clocks, assets and network transports. Native and browser builds use the same core sources.
 
-[API and wire contract](specs/c-abi.md) · [Core architecture](specs/portable-core.md) · [Builds/targets](specs/build-targets.md) · [Unity/Unreal/custom-engine guidance](design/engine-integration.md)
+The scene contains one animated saber fighter per player, a square-tile floor and a training dummy. Character animation follows gameplay automatically. This is a small integration prototype, with a simple floor model and no audio, inventory or authored RPG map. It contains no other game's source or assets.
 
-This is independent of another game's source. One CraftPix prototype saber fighter animates automatically while moving, jumping and attacking. The level is a plain single-screen floor of square CraftPix prototype tiles and one training dummy. The character is approximately two tiles tall; frame-aware attack regions/anchors keep the saber intact, and runtime shader sampling preserves the originals without enlarged texture copies. No animation selection controls or Mangler's Fate code/assets are included.
+## Browser play
 
-## Play
+1. Open the game and enter your privately shared **playtest access code** in Menu. Click the field to type or paste into the browser-native dialog.
+2. Open **Private rooms**. One player clicks **Create room**; the other clicks **Join** on that room.
+3. Keep both pages open until connected. Move with **A/D**, jump with **W**, attack with **F**.
 
-Prepare explicitly on the owning workstation (installed GCC/Clang/wasm-ld required):
+The game exchanges connection details and obtains temporary TURN credentials automatically. **Direct + relay fallback** is the default; **Relay only (test)** forces TURN and shows diagnostics. The shared key authorizes room access and relay usage, not Cloudflare account administration. It stays in page memory and expires under the service's invitation policy.
+
+GitHub Pages hosts the static game. Cloudflare handles protected room setup and TURN credential issuance. Gameplay is host-authoritative WebRTC, direct where possible or relayed when selected. Rooms have two seats, expire when abandoned and are deleted once both peers connect. There are no public lobbies or individual accounts.
+
+Automatic lobby connection, movement and combat have passed between this workstation and a Runpod Chrome guest through TURN. Firefox, direct-path and restrictive-network acceptance remain unverified. Host migration, automatic reconnect and credential refresh are not implemented; start a fresh session before the one-hour TURN credentials expire. See [verification](specs/verification.md) for exact evidence and limits. **Manual connection (advanced)** retains the diagnostic offer/reply flow.
+
+## Native game and network lab
+
+On the owning workstation, explicitly prepare the core and Godot imports:
 
 ```sh
 python3 tools/build_core.py
@@ -18,72 +28,48 @@ python3 tools/build_core.py
 ./play.sh
 ```
 
-The launcher checks core freshness without rebuilding. Other machines can use the standalone CMake example or build the core for their target; the current native Godot shim is tested on Linux x86_64. Godot 4.7 Web uses the same core compiled as a separate import-free Wasm module, awaited before engine startup. There is no fallback GDScript simulation.
+The launchers check freshness without rebuilding. `play.sh` uses the shared Godot Podman runtime; other machines can use the standalone CMake build below. Native Host/Join uses ENet UDP, default port 27840. LAN/VPN or other UDP reachability is required; native ENet does not use browser TURN.
 
- Start with Play solo or Private rooms in the browser; native builds use Host game / Join game. During play, only Menu, status and simple controls remain onscreen. Setup and browser connection codes stay in menus. Move with A/D, jump with W, attack with F. Arrows/Up/L are the alternate scheme. This build is silent.
+```sh
+./play-labs.sh       # chooser: Local pair / Host only / Join only
+./play-labs.sh pair  # two independent game processes
+```
 
-## Live network lab
+The local pair gives the host **A/D/W/F** and guest **Left/Right/Up/L** on one keyboard. Focus either worker or the lab panel to control both; losing all lab focus neutralizes input. The controller routes controls, never world state. Each worker has its own core and exchanges real gameplay messages through ENet.
 
-Run `./play-labs.sh`, then **Network → Local pair**. `./play-labs.sh pair` enters the pair directly. The compact chooser also offers **Host only** and **Join only** for two machines (enter the reachable host address and UDP port).
+Choose **0 / 50 / 100 / 200 ms delay each way**. The HUD shows measured RTT, snapshots, actor count and RPC counters. This is application-level delay, not OS packet shaping. Closing the controller or either worker stops the owned pair. See [network lab](specs/network-lab.md).
 
-The local pair launches **two independent Godot processes** in separate windows. Host owns simulation; guest sends actions through real ENet UDP and receives snapshots. The lab controller owns their lifetime and routes keyboard input; it never copies world state between them.
+## Assets and builds
 
-- P1 host: **A/D** move, **W** jump, **F** attack.
-- P2 guest: **Left/Right** move, **Up** jump, **L** attack.
-- Focus either game window or the small lab panel; both schemes operate their respective processes simultaneously. Releasing focus from all lab windows neutralizes input.
-- Choose **0 / 50 / 100 / 200 ms delay each way** in the panel. Delay is applied to outgoing gameplay RPCs in both processes, including ping replies; RTT includes application scheduling and network time. This is application-level delay injection, not OS packet shaping.
-- Each game displays measured RTT, injected delay, actor count, packet counters, snapshot sequence/age and gaps. The controller shows each process PID and live telemetry. RTT is round-trip; guest snapshot age is time since its last received snapshot. Sequence gaps are observed missing snapshots, not a general network packet-loss percentage.
-- **Back to labs** or closing either game stops the owned pair. Closing the lab controller also stops its workers. No provider account, signaling service or relay is needed for loopback/LAN ENet testing.
-
-The lab is a native development tool. It does not prove browser WebRTC or internet NAT traversal. On two machines the remote route requires UDP reachability (LAN, an existing VPN, or suitable forwarding); the native lab does not use browser TURN.
-
-Raw CraftPix art is excluded from public source. After core preparation/import, the source checkout renders a small original fallback character if licensed art is absent. To restore the licensed selection from your own library:
+Raw CraftPix source art is private. A public checkout uses original fallback art when the licensed selection is absent. Owners can import their own library:
 
 ```sh
 python3 tools/import_craftpix.py --library ../CraftPix
 ./play.sh --headless --editor --import --quit
 ```
 
-The import script needs Python 3 and Pillow; it copies seven character sheets, three button images, one 32×32 tile and the corresponding notices, records hashes and enables mipmaps. This is game integration, not an artwork exporter or AI training/evaluation dataset. See `assets/craftpix-manifest.json` and `THIRD_PARTY_NOTICES.md`.
+The importer requires Python/Pillow. It preserves vendor source, records hashes and enables mipmaps. Runtime frame regions, anchors and shader sampling provide the current character presentation without enlarged source copies. See [assets and hosting](specs/assets-hosting.md), [character presentation](specs/character-presentation.md) and [notices](THIRD_PARTY_NOTICES.md).
 
-## Browser P2P
-
-The web build uses WebRTC data channels. Host runs simulation; guest sends bounded movement/jump/attack input. Host sends snapshots at 20 Hz.
-
-1. Both players enter the same privately shared **playtest access code** in Menu.
-2. Open **Private rooms**. One player clicks **Create room**; the other clicks **Join** on that room.
-3. Connection setup and temporary relay credentials are exchanged automatically. Keep both pages open until connected.
-
-Default **Direct + relay fallback** attempts P2P and uses Cloudflare TURN where needed. **Relay only (test)** forces TURN and displays latency/debug information. The key protects the directory and relay issuance; it provides no Cloudflare account administration. It is retained only in page memory, and the server enforces its expiry. No key is shipped in this public repository or site.
-
-Rooms have two seats, disappear from the available list when full and expire when abandoned. Back / leave room cancels setup. The signaling record is removed once both peers connect; gameplay then continues without lobby polling. See the [private lobby contract](specs/private-lobbies.md) for limits, request usage and testing evidence. All holders of the shared key belong to the same private playtest group; there are no individual accounts or bans.
-
-**Manual connection (advanced)** retains the diagnostic invitation/reply flow. Direct-only manual pairing requires no playtest key; private room access always requires one. Automatic reconnect, host migration and TURN refresh remain deferred. Restrictive networks may still fail; start a fresh session before the one-hour TURN credentials expire. Browser relay play passes in Chromium; Firefox and the wider network matrix remain unverified.
-
-Native Host/Join uses ENet on UDP 27840 for local/LAN development. Use the lab for simultaneous independent instances; the controller owns both workers inside one managed runtime, avoiding project-lock conflicts. Native ENet testing does not establish browser WebRTC or internet connectivity.
-
-## Static site
-
-`./tools/build_web.sh` creates the current candidate in ignored `build/web/`. Serve it locally using `python3 -m http.server 27841 --bind 127.0.0.1 --directory build/web`. Export uses Compatibility rendering and disables threads, allowing ordinary HTTPS GitHub Pages hosting without custom isolation headers. The source branch excludes licensed raw art; the Pages branch contains only the exported playable game and notices. No account credentials belong in either branch. Explicit deployment uses `python3 tools/deploy_pages.py`; it only pushes the reviewed current web candidate to this project’s `gh-pages` branch.
-
-GitHub Pages is a static host, not a signaling or relay server. Read the [conventional NAT/relay/certificate study](design/internet-connectivity.md) for the internet architecture and validation gates. Firebase, Supabase and VPS options are assessed in [design/network-options.md](design/network-options.md). Deferred work is in [BACKLOG.md](BACKLOG.md).
-
-## Standalone and tests
+For the standalone C/C++ library and example:
 
 ```sh
 cmake -S . -B build/cmake -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/cmake --parallel 2
 ctest --test-dir build/cmake --output-on-failure
 ./build/cmake/ember_standalone
-./tests/core.sh
-./tests/animations.sh
-./tests/connections.sh
-./tests/network.sh
-./tests/lab.sh
-./tools/build_web.sh
-./tests/web.sh
 ```
 
-The core suite checks the C ABI, bounded buffers/queues, authority, malformed/stale packets, sanitizer coverage and a 600-tick native/Wasm byte trace. The lab verifies independent processes and replicated combat under delay; the browser smoke test drives real Godot input into Wasm. Test commands/tool requirements are in `specs/build-targets.md`.
+For the static browser candidate:
 
-**Tested:** Linux native C/C++, Godot Linux reference, freestanding wasm32 and Godot Web/Chromium. **Documented possibilities only:** Unity, Unreal, other operating systems and custom engine adapters. The byte-identical test trace is not a general deterministic-lockstep guarantee. Prediction/interpolation, general engine collision integration, automatic signaling, credential refresh and broader internet acceptance are deferred.
+```sh
+./tools/build_web.sh
+python3 -m http.server 27841 --bind 127.0.0.1 --directory build/web
+```
+
+The single-thread Compatibility export runs on ordinary HTTPS Pages hosting. Source stays on `main`; compiled playable resources and notices go to `gh-pages`. Publication uses the explicit project deployment tool and secret audit, documented in [assets and hosting](specs/assets-hosting.md).
+
+## Integration and validation
+
+[Build commands and targets](specs/build-targets.md) · [C ABI/wire contract](specs/c-abi.md) · [Unity/Unreal/custom-engine guidance](design/engine-integration.md) · [Remaining work](BACKLOG.md)
+
+Tested: Linux C/C++, Godot Linux, freestanding wasm32, and Godot Web in Chromium/Chrome. Other engine and OS adapters are documented possibilities. The native/Wasm byte-identical test trace is bounded evidence, not a deterministic-lockstep guarantee. Game state uses host snapshots; prediction and interpolation are not implemented.

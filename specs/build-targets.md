@@ -8,9 +8,9 @@
 | Linux standalone static/shared through CMake | CMake Debug/Release builds and three CTest cases |
 | Godot 4.7 Linux native reference | Small C-interface GDExtension, managed runtime, separate-process ENet lab and replicated combat |
 | wasm32 standalone C ABI | Clang 23.1.3 / wasm-ld, freestanding, no imports, fixed 1 MiB memory; Deno 2.9.7 boundary/trace test |
-| Godot 4.7 Web reference in Chromium | Standalone core Wasm + JS bridge, fixed-tick input/movement smoke test and rendered game |
+| Godot 4.7 Web reference in Chromium | Standalone core Wasm + JS bridge, actual input/rendering, private lobby signaling and forced-relay replicated combat |
 
-Other engines/operating systems are documented possibilities in `design/engine-integration.md`, not implemented/tested adapters. The native Godot shim's pinned 64-bit String/StringName layout and descriptor currently target Linux x86_64 only. Build and package it deliberately for another platform before claiming support. CMake provides the portable core, not those engine adapters. Browser co-op remains experimental/unverified because the earlier ICE environment returned no candidates.
+Other engines/operating systems are documented possibilities in `design/engine-integration.md`, not implemented/tested adapters. The native Godot shim's pinned 64-bit String/StringName layout and descriptor currently target Linux x86_64 only. Build and package it deliberately for another platform before claiming support. CMake provides the portable core, not those engine adapters. Browser forced-relay co-op is verified in Chromium/Chrome, including workstation↔Runpod private lobbies. Firefox, direct/fallback and restrictive-network acceptance remain unverified; see [verification](verification.md).
 
 ## Commands
 
@@ -30,10 +30,22 @@ python3 tools/build_core.py --check  # freshness only, never builds or downloads
 ./tools/build_web.sh             # explicit current static candidate with awaited core Wasm boot
 ./tests/web.sh                   # offscreen Chromium, real keyboard input into Godot -> Wasm
 ./tests/web.sh --animation-check  # real keyboard run/jump/attack and authoritative damage in browser
-./tests/web.sh --connection-setup # additionally capture actual browser Host setup/failure UI
+./tests/web.sh --connection-setup # capture actual advanced browser Host setup UI
+./tests/web.sh --clipboard-check  # native text/copy dialogs, cleanup and gameplay at four sizes
+deno test --no-config server/turn/worker.test.mjs server/turn/lobby.test.mjs
 ```
 
 `tests/core.sh` requires installed GCC/Clang/wasm-ld/Deno; tests/web.sh additionally needs installed Chromium/Gamescope. No package installation or remote module execution occurs. Deno is run without network permission and with read access restricted to build outputs. Native graphics use the owning shared Godot Podman wrapper and Gamescope, muted/Dummy audio. Headless checks do not prove hardware rendering.
+
+Live browser tests use the protected deployed service and privately configured playtest key. With a prepared local Web candidate:
+
+```sh
+gamescope --backend headless -W 960 -H 540 -w 960 -h 540 --xwayland-count 1 -- python3 tests/browser_relay.py --lobby
+# To check the public artifact instead, append:
+# --url https://rareskey.github.io/coop-side-scroller/
+```
+
+For separate-network testing, `tests/browser_lobby_cross_network.py` uses the public game and an explicitly deployed owned controller. Follow [Runpod testing](../design/runpod-agent-browser.md) for setup, result checks and teardown. The harness never allocates cloud resources. The manual-pairing harness remains a separate diagnostic path. Inspect the latest JSON result as well as process output; Gamescope can mask a child failure exit code.
 
 For just the engine-independent C/C++ library and example:
 

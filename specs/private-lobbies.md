@@ -1,10 +1,10 @@
 # Private playtest lobbies
 
-Owners: `src/private_lobby.gd`, browser menus in `src/main.gd`, `server/turn/worker.mjs` (`PrivateLobbies`), `server/turn/lobby.test.mjs` `tests/browser_relay.py --lobby` and `tests/browser_lobby_cross_network.py`.
+Owners: `src/private_lobby.gd`, browser menus in `src/main.gd`, `server/turn/worker.mjs` (`PrivateLobbies`), `server/turn/lobby.test.mjs`, `tests/browser_relay.py --lobby` and `tests/browser_lobby_cross_network.py`.
 
 ## User flow
 
-Enter the private playtest key in the masked menu field once per page load, select a route, and open **Private rooms**. Create a named room or click Join on a listed room. The list is available only to key holders. Both peers automatically obtain temporary TURN credentials (unless direct-only is explicitly selected) and exchange versioned SDP/ICE. No manual invitation/reply copying is required. A displayed eight-hex-character room ID distinguishes names; it is not a password and cannot authorize access by itself.
+Enter the private playtest key through the masked browser-native menu dialog once per page load, select a route, and open **Private rooms**. Room names use the same dialog with ordinary single-line text. Create a named room or click Join on a listed room. The list is available only to key holders. Both peers automatically obtain temporary TURN credentials (unless direct-only is explicitly selected) and exchange versioned SDP/ICE. No manual invitation/reply copying is required. A displayed eight-hex-character room ID distinguishes names; it is not a password and cannot authorize access by itself.
 
 Back / leave room cancels setup and removes the room best-effort. Menu temporarily hides a pending lobby; closing Menu restores it. Solo invalidates pending HTTP results and RTC callbacks. Setup panels suppress gameplay input. List refresh preserves existing buttons/focus when contents are unchanged; long room names clip within a scroll list. Manual pairing remains behind **Manual connection (advanced)** for diagnostics and existing tests. Native ENet and the two-keyboard lab are unchanged.
 
@@ -26,7 +26,7 @@ Active storage deletion is not a promise about Cloudflare's provider-level backu
 
 The service carries connection setup only. WebRTC data channels carry gameplay directly where possible, or through TURN when required. The C++ core remains host-authoritative, transport-independent and engine-independent. Every browser has its own Wasm core. No simulation, clocks, rendering, input capture or physics moved to Cloudflare. Signaling availability is unnecessary after connection; TURN may still be needed for the session's traffic.
 
-No host migration, reconnect/ICE restart, individual accounts, public lobby discovery, password-per-room, join-by-link, TCP-only acceptance or broad NAT reliability guarantee is implemented. Host exit ends play. The tester key still needs one private transfer and expires under the existing invitation policy.
+Host migration, reconnect/ICE restart, individual accounts, public lobby discovery, password-per-room and join-by-link are not implemented. TCP-only operation and broader NAT behavior remain unverified. Host exit ends play. The tester key still needs one private transfer and expires under the existing invitation policy.
 
 ## Deployment and verification
 
@@ -48,21 +48,12 @@ deno test --no-config server/turn/worker.test.mjs server/turn/lobby.test.mjs
 gamescope --backend headless -W 960 -H 540 -w 960 -h 540 --xwayland-count 1 -- python3 tests/browser_relay.py --lobby
 ```
 
-Thirteen offline Worker tests cover auth/origin/expiry, concurrent joins, capacity, idempotent creation, membership isolation, malformed/immutable signals, session mismatch, lease/alarm cleanup, connected deletion, migration and all 32 rooms carrying near-maximum-size signals. Live two-window Chromium lobby→relay movement/combat passes with independent cores, relay/relay candidates, bidirectional bytes and shared HP 12→11 (126–149 ms ICE RTT in the first run). This verifies the deployed SQLite binding as well as automatic signaling. The separate-network lobby result below extends this acceptance; Firefox remains unverified.
+Offline tests cover authorization, concurrency, capacity, idempotency, membership isolation, immutable/session-matched signals, cleanup and migration. The 32-room capacity case includes near-maximum offer/answer envelopes. Live two-window and workstation↔Runpod tests exercise the deployed directory, temporary TURN credentials and actual replicated gameplay. Exact results and limits are recorded in [verification](verification.md).
 
-Provider references: [SQLite value limits](https://developers.cloudflare.com/durable-objects/platform/limits/), [SQLite storage and alarms](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [migration contracts](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/), [plan availability](https://developers.cloudflare.com/durable-objects/platform/pricing/). SQLite Durable Objects are available on Workers Free; actual usage still needs monitoring.
-
+Provider contract references: [SQLite value limits](https://developers.cloudflare.com/durable-objects/platform/limits/), [storage and alarms](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [migrations](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/) and [pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/). No free-usage or spending-cap guarantee follows from the prototype's request limits; monitor the actual account.
 
 ## Separate-network lobby acceptance
 
-On 2026-10-19, `tests/browser_lobby_cross_network.py` passed against public Pages `8cf749d` with the deployed protected lobby backend. A hardware-rendered workstation Chromium host and the owned Runpod Chrome 141 controller guest entered the playtest key through the new native DOM field, used Create/Join, and connected without copying connection descriptions. Both selected relay/relay candidates under relay-only policy; ICE RTT was 218 ms / 228 ms. Independent Wasm cores replicated guest movement, guest attacks (HP 12→9) and subsequent host movement. Final sampled positions matched on both: host x=230994 and guest x=673618 milli-pixels. Both-ready signaling cleanup completed before gameplay verification, proving the connected session no longer depended on its directory entry.
+The public Pages `8cf749d` lobby flow passed workstation Chromium host ↔ Runpod Chrome guest using native DOM key entry, automatic Create/Join, relay/relay traffic and replicated movement/combat. The signaling record was cleaned up before gameplay verification. The full result, artifact/evidence identity and remaining browser/network gaps are in [verification](verification.md#separate-network-private-lobby).
 
-Full-scene directory, join and connected captures were visually inspected. The host renderer was NVIDIA RTX 2080 Ti; remote rendering was intentional Mesa llvmpipe. Safe JSON, screenshots and hosted hashes remain ignored evidence under `build/lobby-cross-network*`. The separate controller pod was deleted after recovery; the user's manual Firefox pod was preserved. Firefox, direct-path fallback, UDP-blocked/TCP-only networks, reconnect and the broader browser/network matrix remain unverified.
-
-Run only after explicitly deploying the controller as documented in [Runpod agent browser](../design/runpod-agent-browser.md):
-
-```sh
-gamescope --backend headless -W 960 -H 540 -w 960 -h 540 --xwayland-count 1 -- python3 tests/browser_lobby_cross_network.py
-```
-
-The harness owns no cloud lifecycle. It selects only its captured room ID, detects old Godot versus new native DOM key entry, and waits for the directory response to reach the Godot UI before clicking Create. It never captures credentials or SDP in reports. Check `build/lobby-cross-network-latest.json` for the current result: Gamescope can exit successfully even when its child test fails. The last successful report is retained separately. Preflight failure reporting was checked to mark the new attempt failed without erasing historical evidence.
+Run `tests/browser_lobby_cross_network.py` under headless Gamescope only after explicitly preparing the separate controller; [Runpod testing](../design/runpod-agent-browser.md) owns that lifecycle. The harness joins only its captured room ID, supports old/current key fields and waits for Godot to consume directory completion before Create. It does not allocate cloud resources. Inspect `build/lobby-cross-network-latest.json` rather than relying solely on Gamescope's process status.

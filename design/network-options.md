@@ -1,25 +1,28 @@
-# Connection service options
+# Networking service decision
 
-For the current conventional deployment recommendation, router/certificate details and verification gates, read [internet-connectivity.md](internet-connectivity.md).
+## Selected architecture
 
-Decision: static Godot Web game on GitHub Pages; direct WebRTC between a host and one guest. Automatic signaling is deferred; a protected Cloudflare TURN issuer is now deployed (see [service contract](../specs/turn-service.md)). Temporary manual connection-code exchange keeps the first experiment independent of provider accounts. Browser ENet is unavailable; the native UDP route is only a development aid.
+The current deployment uses GitHub Pages for static game files and Cloudflare for protected room signaling and TURN credential issuance. A SQLite Durable Object holds the private room directory and bounded offer/answer exchange. WebRTC carries gameplay directly or through Cloudflare TURN. The host browser owns simulation; Cloudflare does not run the C++ game core.
 
-| Option | Useful role | Limits / decision |
+See [architecture](../specs/architecture.md), [private lobbies](../specs/private-lobbies.md) and [TURN service](../specs/turn-service.md) for the implemented contracts. Provider selection is settled for this prototype; deploying a VPS or adding Firebase/Supabase is not outstanding work.
+
+## Alternatives retained for future decisions
+
+| Option considered | Possible role | What would justify revisiting it |
 | --- | --- | --- |
-| Firebase Realtime Database | Expiring room records, offers, answers, ICE candidates | Possible signaling adapter; security rules/auth and cleanup required. Spark has a 100 simultaneous-connection limit; storage/download quotas also apply. Do not stream movement through a database by default. |
-| Supabase Realtime | Private room signaling via broadcast; auth and optional room metadata | Possible signaling adapter; private channel policy and expiration required. Billing counts messages and peak connections. Do not assume free unlimited 60 Hz state traffic. |
-| Small VPS | Small WSS signaling service; optional separate coturn service | Most control and operational responsibility; HTTPS, firewall, credential rotation and bandwidth management. No machine selected or price promised. |
-| GitHub Pages | HTML, WASM, PCK and static notices | Cannot run a first-connection service or relay. |
+| Firebase Realtime Database | Authenticated, expiring signaling records | A project already using Firebase identity/data services; still requires a separate TURN service |
+| Supabase Realtime | Private signaling channels and room metadata | A project already using Supabase identity/data services; still requires a separate TURN service |
+| VPS signaling plus coturn | Self-managed connection setup and relay | Networking/control requirements that warrant owning certificates, firewall, updates, credentials and bandwidth operations |
+| Managed Cloudflare services (selected) | Protected private directory, signaling and temporary managed TURN access | Implemented with the user's configured operator; evaluate measured usage before changing providers |
 
-Signaling connects peers; STUN discovers network addresses; TURN carries gameplay traffic if direct connectivity cannot be established. A VPS can host both signaling and TURN, but those remain distinct services. Without TURN, friend co-op cannot promise connectivity on all networks. Host authority simplifies shared state but does not eliminate synchronization, prediction, latency or cheating issues.
+Old provider quotas and speculative price estimates are intentionally not maintained here. Recheck the selected service's current limits and actual account usage before a purchase or architecture change. None of these options implies unlimited free relay traffic.
 
-Prefer a tiny VPS WSS service if TURN will also be self-hosted; use Firebase/Supabase if their managed auth and room services are already available. No final provider choice is needed to build the animation and transport boundaries.
+## Decisions worth retaining
 
-Verified public documentation, 2026-10-19:
+- Manual offer/reply exchange isolated WebRTC and TURN from signaling during early tests. It remains under **Manual connection (advanced)** for diagnostics; ordinary players use private rooms.
+- Signaling, relay and simulation remain separate responsibilities. Switching room storage or relay providers does not change the core ABI or gameplay messages.
+- HTTP polling was sufficient for bounded, short-lived two-player setup. WebSockets are a future operational choice, not a missing requirement for automatic connection.
+- Directory storage changed from one aggregate value to per-room values so 32 rooms with near-maximum signals fit the storage value limit. Migration preserves existing reservations; the regression remains in `server/turn/lobby.test.mjs`.
+- A historical direct-only attempt gathered no candidates. That described one environment and motivated relay validation; it does not establish that direct WebRTC is generally broken. Subsequent forced-relay and automatic-lobby tests passed across two networks.
 
-- [Godot web export limitations](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_web.html)
-- [Godot WebRTC and signaling](https://docs.godotengine.org/en/stable/tutorials/networking/webrtc.html)
-- [Firebase pricing](https://firebase.google.com/pricing) and [database limits](https://firebase.google.com/docs/database/usage/limits)
-- [Supabase Realtime pricing](https://supabase.com/docs/guides/realtime/pricing) and [limits](https://supabase.com/docs/guides/realtime/limits)
-
-Quotas/prices can change; recheck at deployment. No estimate here implies an account entitlement or zero relay cost.
+Earlier implementation/deployment chronology remains in Git history. Current limitations belong in [the backlog](../BACKLOG.md), and current test claims belong in [verification](../specs/verification.md).

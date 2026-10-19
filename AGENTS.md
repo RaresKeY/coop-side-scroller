@@ -1,6 +1,6 @@
 # Co-op Side Scroller
 
-Read `specs/_readme.md` before changes. This is a portable C++ co-op core with a focused single-character Godot web/native reference adapter. Preserve its small scope and keep specs synchronized.
+Read `specs/_readme.md` and `specs/architecture.md` before changes. This is a portable C++ co-op core with a focused single-character Godot web/native reference adapter. Keep implemented contracts in `specs/`, decision rationale/integration guidance in `design/`, evidence in `specs/verification.md` and future work in `BACKLOG.md`. Update the relevant documents when behavior changes; do not append obsolete rollout chronology to current contracts.
 
 Shared rules/authority/messages belong in the engine-independent `core/`, behind `ec_v1_*` C ABI; keep engine APIs, rendering, input capture, clocks and transports in adapters. Read `specs/c-abi.md` and `specs/portable-core.md` before core changes. Never reintroduce a GDScript simulation or manual animation selection.
 

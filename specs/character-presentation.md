@@ -4,7 +4,7 @@ Owners: `src/character_view.gd`, `shaders/pixel_superscale.gdshader`, integratio
 
 ## Size, atlas regions and anchors
 
-Character display scale is 1× instead of the previous 2×: standing height is approximately 67 reference pixels, just over two 32-pixel tiles. The original fallback sprite is also half its old display scale (1.5× instead of 3×). The training dummy is 64 pixels tall, with a health bar above it. World units, camera extent, floor and input schemes remain the same.
+Character display scale is 1×: standing height is approximately 67 reference pixels, just over two 32-pixel tiles. The original fallback sprite uses display scale 1.5×. The training dummy is 64 pixels tall, with a health bar above it. World units and floor rules are defined in [portable core](portable-core.md).
 
 CraftPix PNGs and source-library art remain untouched and retain their manifest hashes. Idle/walk/run/hurt/dead use their original 128×128 atlas cells. Jump uses source-frame-specific foot anchors to avoid adding the sheet's baked vertical offsets to the actual physical trajectory: y anchors are `[128,128,128,128,128,119,108,106,109,118,117,128,128,128,128,128,128]`, x=64. Run/walk retain their authored gait/flight-phase foot movement with baseline 128.
 
