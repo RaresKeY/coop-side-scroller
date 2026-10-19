@@ -1,0 +1,11 @@
+{
+  "godot_interface": {
+    "repository": "https://github.com/godotengine/godot-cpp",
+    "commit": "d7b6162249ed52796a8301d216c24ee71d68c2bf",
+    "source": "gen/include/gdextension_interface.h generated from gdextension/gdextension_interface.json",
+    "sha256": "dbf8bb6fe4e6449d4bed4904bd3940b50e7e8d0e62fb407ee2908091d35d2de3",
+    "license": "MIT; notice retained in header"
+  },
+  "core_third_party_runtime_dependencies": [],
+  "javascript_dependencies": []
+}

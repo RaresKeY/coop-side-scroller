@@ -1,9 +1,12 @@
 # Co-op Side Scroller specs
 
-Standalone Godot prototype with one CraftPix character, a simple square-tile floor, static Web export and independent-process co-op testing.
+Portable C++ co-op core with a versioned C ABI, native/Wasm builds, a Godot reference adapter, one CraftPix character, square-tile floor and independent-process testing.
 
 | Spec | Sources | Read when |
 | --- | --- | --- |
+| [Portable core](portable-core.md) | `core/`, `adapters/` | Changing fixed-tick simulation, authority or state/event boundaries |
+| [C ABI](c-abi.md) | `core/include/ember_core.h`, `core/src/ember_core.cpp` | Changing lifetime, status, native layouts, serialization or bridge operations |
+| [Builds and targets](build-targets.md) | `CMakeLists.txt`, `tools/build_core.py`, `tests/`, `vendored/` | Building/testing or assessing tested platform support |
 | [Prototype](prototype.md) | `src/main.gd`, `project.godot`, `main.tscn` | Changing gameplay, menus, animation or transport |
 | [Network lab](network-lab.md) | `play-labs.sh`, `labs/`, `src/lab_keys.gd`, `tests/lab.sh` | Changing interactive tests, keyboard routing, latency/debug or process ownership |
 | [Assets and hosting](assets-hosting.md) | `tools/`, `assets/craftpix-manifest.json`, `export_presets.cfg`, `.gitignore` | Importing art or building/publishing |

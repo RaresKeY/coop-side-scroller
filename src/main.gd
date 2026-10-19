@@ -1,7 +1,8 @@
 extends Node2D
 
 var port := 27840
-const FLOOR = 448.0
+const PortableCore = preload("res://adapters/godot/portable_core.gd")
+var core
 const LabKeys = preload("res://src/lab_keys.gd")
 var lab_role := ""
 var lab_socket: PacketPeerUDP
@@ -21,14 +22,12 @@ var rtt := -1
 var debug_label: Label
 var ground_tile: Texture2D
 var players: Dictionary = {}
-var commands: Dictionary = {}
 var status: Label
 var address: LineEdit
 var mode := "solo"
 var tick := 0
 var elapsed := 0.0
 var connected_at := 0.0
-var last_input := 0.0
 var enemy_hp := 12
 var enemy_flash := 0.0
 var enemy_x := 720.0
@@ -51,6 +50,18 @@ var camera: Camera2D
 var test_partner_seen := false
 
 func _ready():
+ Engine.physics_ticks_per_second = 60
+ core = PortableCore.new()
+ if not core.valid:
+  push_error("Portable C++ core unavailable. Run python3 tools/build_core.py (native) or use the prepared Web build.")
+  get_tree().quit(1)
+  return
+ core.outgoing_message.connect(func(bytes):
+  if mode != "solo": queue_packet("gameplay",[bytes])
+ )
+ core.core_event.connect(func(type,_slot,_value,_fixed_tick):
+  if type == 4: enemy_flash = 0.15
+ )
  for arg in OS.get_cmdline_user_args():
   if arg.begins_with("--lab-role="): lab_role = arg.get_slice("=",1)
   if arg.begins_with("--control-port="): control_port = int(arg.get_slice("=",1))
@@ -221,9 +232,8 @@ func rtc_begin(server: bool) -> bool:
   status.text = "WebRTC initialization failed"
   return false
  var peer = WebRTCMultiplayerPeer.new()
- var channels = [MultiplayerPeer.TRANSFER_MODE_UNRELIABLE_ORDERED, MultiplayerPeer.TRANSFER_MODE_UNRELIABLE_ORDERED]
- if server: peer.create_server(channels)
- else: peer.create_client(2,channels)
+ if server: peer.create_server()
+ else: peer.create_client(2)
  error = peer.add_peer(rtc,2 if server else 1,100)
  if error != OK:
   solo()
@@ -231,7 +241,8 @@ func rtc_begin(server: bool) -> bool:
   return false
  multiplayer.multiplayer_peer = peer
  mode = "host" if server else "client"
- if server: spawn(1)
+ core.configure(1 if server else 2)
+ sync_core_view()
  connected_at = elapsed
  local_signal = {"type":"","sdp":"","ice":[]}
  rtc.session_description_created.connect(func(type, sdp):
@@ -320,20 +331,30 @@ func reset_network():
  outbox.clear()
  signal_finished = false
  players.clear()
- commands.clear()
  for s in sprites.values(): s.queue_free()
  sprites.clear()
  enemy_hp = 12
 
-func spawn(id: int):
- players[id] = {"x":180.0 if id == 1 else 260.0,"y":FLOOR,"vy":0.0,"face":1.0,"attack":0.0,"moving":false,"jump_held":false,"grounded":true,"attack_id":0}
+func sync_core_view():
+ var state = core.actors()
+ for id in sprites.keys():
+  if not state.has(id):
+   sprites[id].queue_free()
+   sprites.erase(id)
+ players = state
+ enemy_hp = core.command(10,1)
+ snapshot_seq = core.command(10,11)
+
+func _exit_tree():
+ if core != null: core.close()
 
 func solo():
  setup_menu.hide()
  signal_panel.hide()
  reset_network()
  mode = "solo"
- spawn(1)
+ core.configure(1)
+ sync_core_view()
  status.text = "Solo"
 
 func host():
@@ -351,7 +372,8 @@ func host():
   return
  multiplayer.multiplayer_peer = peer
  mode = "host"
- spawn(1)
+ core.configure(1)
+ sync_core_view()
  status.text = "Host / UDP %d / waiting" % port
 
 func join_game():
@@ -369,47 +391,47 @@ func join_game():
   return
  multiplayer.multiplayer_peer = peer
  mode = "client"
+ core.configure(2)
+ sync_core_view()
  status.text = "Connecting…"
  connected_at = elapsed
 
 func peer_joined(id: int):
  if mode == "host":
-  spawn(id)
+  core.peer_active(true)
+  sync_core_view()
   test_partner_seen = true
   signal_panel.hide()
   status.text = "Partner joined • host authority • snapshots 20 Hz"
 
-func peer_left(id: int):
- players.erase(id)
- commands.erase(id)
- if sprites.has(id):
-  sprites[id].queue_free()
-  sprites.erase(id)
- if mode == "host": status.text = "Partner left • waiting for another"
+func peer_left(_id: int):
+ if mode == "host":
+  core.peer_active(false)
+  sync_core_view()
+  status.text = "Partner left • waiting for another"
 
-@rpc("any_peer", "call_remote", "unreliable_ordered", 1)
-func submit_input(axis: float, jump: bool, attack: bool):
+@rpc("any_peer", "call_remote", "unreliable_ordered")
+func gameplay_message(bytes: PackedByteArray):
  rx += 1
- if mode != "host" or not is_finite(axis): return
- var id = multiplayer.get_remote_sender_id()
- if players.has(id): commands[id] = [clampf(axis,-1,1),jump,attack,elapsed]
-
-@rpc("authority", "call_remote", "unreliable_ordered", 2)
-func snapshot(state: Dictionary, hp: int, ex: float, sequence: int):
- rx += 1
- last_snapshot_ms = Time.get_ticks_msec()
- if last_snapshot_seq > 0: snapshot_gaps += maxi(0,sequence-last_snapshot_seq-1)
- last_snapshot_seq = sequence
- if mode != "client": return
- players = state
- enemy_hp = hp
- enemy_x = ex
+ var sender = multiplayer.get_remote_sender_id()
+ var sender_slot = 0
+ if mode == "host" and sender in multiplayer.get_peers(): sender_slot = 2
+ if mode == "client" and sender == 1: sender_slot = 1
+ if sender_slot == 0: return
+ var before = core.command(10,11)
+ var result = core.receive_message(sender_slot,bytes)
+ if mode == "client" and result == 0:
+  var sequence = core.command(10,11)
+  last_snapshot_ms = Time.get_ticks_msec()
+  if before > 0: snapshot_gaps += maxi(0,sequence-before-1)
+  last_snapshot_seq = sequence
+ sync_core_view()
 
 @rpc("any_peer", "call_remote", "unreliable")
 func ping(sent: int):
  rx += 1
  var sender = multiplayer.get_remote_sender_id()
- if sender == 1 or players.has(sender): queue_packet("pong",[sender,sent])
+ if sender in multiplayer.get_peers(): queue_packet("pong",[sender,sent])
 
 @rpc("any_peer", "call_remote", "unreliable")
 func pong(sent: int):
@@ -427,8 +449,9 @@ func flush_packets():
   if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED: continue
   tx += 1
   match packet.kind:
-   "input": submit_input.rpc_id(1,d[0],d[1],d[2])
-   "snapshot": snapshot.rpc(d[0],d[1],d[2],d[3])
+   "gameplay":
+    if mode == "client": gameplay_message.rpc_id(1,d[0])
+    elif mode == "host" and not multiplayer.get_peers().is_empty(): gameplay_message.rpc(d[0])
    "ping":
     if d[0] in multiplayer.get_peers(): ping.rpc_id(d[0],d[1])
    "pong":
@@ -449,7 +472,7 @@ func lab_control():
  if Time.get_ticks_msec()-last_control > 250: control_input = [0.0,false,false]
  if tick % 15 == 0:
   var age = Time.get_ticks_msec()-last_snapshot_ms if last_snapshot_ms > 0 else -1
-  var info = {"kind":"stats","role":lab_role,"mode":mode,"players":players.size(),"rtt":rtt,"age":age,"seq":snapshot_seq if mode=="host" else last_snapshot_seq,"gaps":snapshot_gaps,"tx":tx,"rx":rx,"delay":delay_ms,"pid":OS.get_process_id(),"x":players.get(1 if lab_role=="host" else multiplayer.get_unique_id(),{}).get("x",-1),"hp":enemy_hp}
+  var info = {"kind":"stats","role":lab_role,"mode":mode,"players":players.size(),"rtt":rtt,"age":age,"seq":snapshot_seq if mode=="host" else last_snapshot_seq,"gaps":snapshot_gaps,"tx":tx,"rx":rx,"delay":delay_ms,"pid":OS.get_process_id(),"x":players.get(1 if lab_role=="host" else 2,{}).get("x",-1),"hp":enemy_hp}
   lab_socket.put_packet(JSON.stringify(info).to_utf8_buffer())
   debug_label.text = "RTT %s ms / delay %d ms each way / actors %d\nTX %d RX %d / snapshot %d / age %d ms / gaps %d" % [str(rtt) if rtt>=0 else "--",delay_ms,players.size(),tx,rx,snapshot_seq if mode=="host" else last_snapshot_seq,age,snapshot_gaps]
 
@@ -471,41 +494,14 @@ func _physics_process(dt):
   attack = control_input[2]
  if typing or setup_menu.visible or signal_panel.visible: axis = 0; jump = false; attack = false
  if test_mode == "client": axis = 1.0 if elapsed < 2.4 else 0.0; jump = elapsed < 2 and fmod(elapsed,1.2)<0.15; attack = true
- if mode == "client":
-  if multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
-   queue_packet("input",[axis,jump,attack])
-  elif elapsed-connected_at > (60 if OS.has_feature("web") else 8):
-   solo()
-   status.text = "Connection timed out • returned to solo"
- else:
-  commands[1] = [axis,jump,attack,elapsed]
-  if Input.is_physical_key_pressed(KEY_R): enemy_hp = 12
-  enemy_x = 720.0
-  for id in players:
-   var s = players[id]
-   var c = commands.get(id,[0.0,false,false,0.0])
-   if elapsed-c[3] > 0.3: c = [0.0,false,false,elapsed]
-   s.moving = abs(c[0]) > 0.1
-   if s.moving: s.face = sign(c[0])
-   s.x = clampf(s.x+c[0]*170*dt,24,936)
-   if c[1] and not s.jump_held and s.grounded: s.vy = -340.0
-   s.jump_held = c[1]
-   s.vy += 900*dt
-   s.y = minf(FLOOR,s.y+s.vy*dt)
-   s.grounded = s.y == FLOOR
-   if s.grounded: s.vy = 0.0
-   s.attack = maxf(0,s.attack-dt)
-   if c[2] and s.attack == 0:
-    s.attack = 0.4
-    s.attack_id += 1
-    if enemy_hp > 0 and abs(s.x-enemy_x)<65 and abs(s.y-FLOOR)<45 and sign(enemy_x-s.x)==s.face:
-     enemy_hp -= 1
-     enemy_flash = 0.15
-  if mode == "host" and tick % 3 == 0:
-   snapshot_seq += 1
-   queue_packet("snapshot",[players.duplicate(true),enemy_hp,enemy_x,snapshot_seq])
+ if mode == "client" and multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED and elapsed-connected_at > (60 if OS.has_feature("web") else 8):
+  solo()
+  status.text = "Connection timed out • returned to solo"
+ if mode != "client" and Input.is_physical_key_pressed(KEY_R): core.command(11)
+ core.step(axis,jump,attack)
+ sync_core_view()
  enemy_flash = maxf(0,enemy_flash-dt)
- var local_id = multiplayer.get_unique_id() if mode == "client" else 1
+ var local_id = 2 if mode == "client" else 1
  if players.has(local_id): camera.position.x = 480.0
  update_sprites()
  queue_redraw()
@@ -513,7 +509,7 @@ func _physics_process(dt):
   if test_mode == "host" and (not test_partner_seen or enemy_hp >= 12):
    push_error("NETWORK TEST: partner missing")
    get_tree().quit(1)
-  elif test_mode == "client" and (players.size() != 2 or not players.has(multiplayer.get_unique_id()) or enemy_hp >= 12):
+  elif test_mode == "client" and (players.size() != 2 or not players.has(2) or enemy_hp >= 12):
    push_error("NETWORK TEST: authoritative state missing")
    get_tree().quit(1)
   else:
@@ -541,7 +537,7 @@ func update_sprites():
   var sprite = sprites[id]
   sprite.flip_h = s.face < 0
   if sprite is AnimatedSprite2D:
-   var clip = "Attack 1" if s.attack>0.0 else "Jump" if s.y<FLOOR else "Run" if s.moving else "Idle"
+   var clip = ["Idle","Run","Jump","Attack 1","Walk"][s.animation]
    sprite.position = Vector2(s.x,s.y-(94 if clip == "Attack 1" else 128))
    if sprite.animation != clip or (clip == "Attack 1" and sprite.get_meta("attack_id",-1) != s.attack_id):
     sprite.play(clip)
@@ -549,7 +545,7 @@ func update_sprites():
     sprite.set_meta("attack_id",s.attack_id)
   else:
    sprite.position = Vector2(s.x,s.y-34)
-   sprite.frame = 4 if s.attack>0.22 else 3 if s.y<FLOOR else 1+int(elapsed*10)%2 if s.moving else 0
+   sprite.frame = 4 if s.animation == 3 else 3 if s.animation == 2 else 1+int(elapsed*10)%2 if s.animation in [1,4] else 0
 
 func _draw():
  draw_rect(Rect2(0,0,960,540),Color("17212d"))

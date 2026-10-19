@@ -6,6 +6,9 @@
 - Test Chrome/Firefox and separate PCs/networks, failed NAT traversal, joining/leaving/rejoining and latency/loss. Localhost checks do not prove internet reliability.
 - Guest interpolation and prediction/reconciliation. Present guest snapshots are visibly coarse under latency; no rollback or host migration.
 - Integrate into a real game's movement, collision, enemies and animation state only after the owning engine/source contracts are available. This prototype is not a drop-in multiplayer retrofit.
-- Shared enemy hit feedback, snapshot event IDs, action tick sequencing, packet size limits and prolonged loss tests.
+- Reliable gameplay event IDs/acknowledgements, action-tick reconciliation and prolonged loss tests. Current core already emits damage/animation events, versions and bounds its packets, and sequences inputs/snapshots.
 - Touch controls, gamepad bindings, accessibility/layout beyond the desktop prototype, game audio and proper platform collision.
 - Add network loss/jitter simulation and a browser-to-browser lab after the deferred WebRTC/ICE environment work. Native independent-process lab currently provides delay injection and live RTT/debug.
+
+- Additional engine/OS adapters are deferred: Unity/Unreal/custom integration guidance exists, but only Godot/native standalone/wasm32 boundaries are tested. No engine-specific collision integration or physics callbacks are implemented.
+- Broaden native/Wasm parity coverage across compilers, architectures and input traces before making any deterministic-lockstep claim.

@@ -9,7 +9,7 @@ def git(*args, **kwargs):
  return subprocess.check_output(['git','-C',str(ROOT),*args],text=True,**kwargs).strip()
 if git('remote','get-url','--push','origin') != DESTINATION:
  raise SystemExit('Origin does not match the configured GitHub project; inspect before deployment.')
-for name in ['index.html','index.js','index.pck','index.wasm','.nojekyll','THIRD_PARTY_NOTICES.txt']:
+for name in ['index.html','index.js','index.pck','index.wasm','ember_core.wasm','ember_core_bridge.js','.nojekyll','THIRD_PARTY_NOTICES.txt']:
  if not (SITE/name).is_file(): raise SystemExit(f'Missing candidate {name}; run tools/build_web.sh')
 allowed = {'.html','.js','.pck','.wasm','.png','.txt'}
 if any(p.is_dir() or (p.name!='.nojekyll' and p.suffix not in allowed) for p in SITE.iterdir()):
