@@ -55,8 +55,9 @@ func step(axis: float, jump: bool, attack: bool):
 
 func drain_events():
  while command(12,0) > 0:
-  core_event.emit(command(12,0),command(12,1),command(12,2),command(12,3))
+  var event = [command(12,0),command(12,1),command(12,2),command(12,3)]
   command(13)
+  core_event.emit(event[0],event[1],event[2],event[3])
 
 func actors() -> Dictionary:
  var result := {}

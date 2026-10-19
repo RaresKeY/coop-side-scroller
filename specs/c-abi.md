@@ -21,7 +21,7 @@ All arguments and fields use uint32_t/int32_t, uint8_t buffers, an opaque EC_Han
 | `read_view(handle,&view,capacity)` | Copies current state; capacity must be at least sizeof(EC_View). Caller memory must be valid and naturally aligned. |
 | `reset_dummy(handle)` | Host-only prototype/debug action. |
 
-Status values: EC_OK=0, EC_EMPTY=1, invalid handle=-1, invalid argument=-2, authority=-3, malformed message=-4, stale sequence=-5, capacity=-6. Exported functions do not throw. External callers are responsible for valid accessible pointer buffers, correct capacities, handle lifetime and external serialization. Handles and creation/destruction are not thread-safe. Do not invoke a handle concurrently or recursively from callbacks. Event/message callbacks are adapter-owned, after a completed call.
+Status values: EC_OK=0, EC_EMPTY=1, invalid handle=-1, invalid argument=-2, authority=-3, malformed message=-4, stale sequence=-5, capacity=-6. Exported functions do not throw. External callers are responsible for valid accessible pointer buffers, correct capacities, handle lifetime and external serialization. Handles and creation/destruction are not thread-safe. Do not invoke a handle concurrently or recursively while a core call is active. Event/message callbacks are adapter-owned, after a completed call.
 
 ## Wire serialization
 
@@ -52,7 +52,7 @@ The input and snapshot sequence spaces are independent. Messages are idempotent 
 
 ## Numeric reference bridge
 
-`ec_v1_command(handle,operation,a,b)` is a bounded helper for the minimal native Godot and JS bridges. It uses int32 inputs/results so JS needs no i64/BigInt interop. Engine integrations with native FFI should prefer the typed calls above. Command output counters reinterpret uint32 values as signed int32 after 2³¹; typed ABI views remain uint32.
+`ec_v1_command(handle,operation,a,b)` is a bounded helper for the minimal native Godot and JS bridges. It uses int32 inputs/results so JS needs no i64/BigInt interop. Godot rejects arguments outside int32 range before narrowing, and validates Variant argument types before conversion. The facade consumes events before invoking their callbacks. Engine integrations with native FFI should prefer the typed calls above. Command output counters reinterpret uint32 values as signed int32 after 2³¹; typed ABI views remain uint32.
 
 | Operation | Meaning |
 | --- | --- |
@@ -60,7 +60,7 @@ The input and snapshot sequence spaces are independent. Messages are idempotent 
 | 1 | Set local input: a=axis, b=flags |
 | 2 | Fixed tick |
 | 3 | Set remote membership: a=2, b=active |
-| 4/5/6 | Begin receive (a=authenticated slot,b=size), write each byte (a=index,b=byte), finish receive. Write all bytes before finish; stage is per handle. |
+| 4/5/6 | Begin receive (a=authenticated slot,b=size), write each byte (a=index,b=byte), finish receive. Write all bytes before finish; duplicate writes do not count as missing bytes. Incomplete finish rejects, and every finish consumes the stage. Begin requires 12–104 bytes and invalidates any previous stage even on error; stage is per handle. |
 | 7/8/9 | Peek outgoing size, read outgoing byte at a, consume outgoing message |
 | 10 | Read view field a, actor slot b where needed |
 | 11 | Host reset dummy |

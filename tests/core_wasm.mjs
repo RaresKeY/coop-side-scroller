@@ -41,5 +41,16 @@ check(api.ec_v1_read_view(guest,scratch,1)===-6,'small buffer accepted');
 check(api.ec_v1_read_view(guest,scratch,116)===0,'typed C view copy');
 const view=new DataView(api.memory.buffer,scratch,116);
 check(view.getUint32(0,true)===116 && view.getUint32(8,true)===0,'view layout');
+// Missing bytes cannot be supplied by an earlier stage, even on Wasm.
+cmd(host,0,1,1);cmd(host,3,2,1);cmd(guest,0,2,2);cmd(guest,2);
+const input=Array.from({length:cmd(guest,7)},(_,i)=>cmd(guest,8,i));
+check(cmd(host,4,2,input.length)===0,'stage begin');
+for(let i=0;i<input.length;i++) check(cmd(host,5,i,input[i])===0,'stage write');
+check(cmd(host,6)===0,'complete stage');
+input[8]++;
+check(cmd(host,4,2,input.length)===0,'second stage begin');
+for(let i=0;i<input.length-1;i++) { cmd(host,5,i,input[i]);cmd(host,5,i,input[i]); }
+check(cmd(host,6)===-4,'incomplete stage accepted');
+check(cmd(host,6)===-4,'stage replay accepted');
 api.ec_v1_destroy(guest);api.ec_v1_destroy(host);
 console.log('Wasm ABI + native parity PASS', result);

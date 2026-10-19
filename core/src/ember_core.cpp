@@ -29,7 +29,8 @@ struct EC_Handle {
   EC_Event events[EVENT_CAP];
   uint32_t event_head, event_count;
   uint8_t staging[EC_MAX_MESSAGE];
-  uint32_t staging_size, staging_sender;
+  uint32_t staging_size, staging_sender, staging_count;
+  bool staging_written[EC_MAX_MESSAGE];
 };
 namespace {
 EC_Handle handles[32]{};
@@ -209,9 +210,12 @@ int32_t ec_v1_tick(EC_Handle *h) {
       p.facing = in.axis > 0 ? 1 : -1;
     uint32_t jump = (in.flags & EC_INPUT_JUMP) != 0;
     if (jump && !h->held_jump[i] && p.grounded)
-      p.vy = -5667;
+      p.vy = -6000;
     h->held_jump[i] = jump;
-    p.vy += 250;
+    // Variable-height rise, a short apex and a quicker fall.
+    if (!jump && p.vy < -2400)
+      p.vy = -2400;
+    p.vy += p.vy < 0 ? 300 : 500;
     p.y += p.vy;
     if (p.y >= 448000) {
       p.y = 448000;
@@ -225,6 +229,9 @@ int32_t ec_v1_tick(EC_Handle *h) {
       p.attack_ticks = 24;
       p.attack_id++;
       emit(h, EC_EVENT_ATTACK, p.slot, p.attack_id);
+    }
+    // The downstroke reaches the target at tick 15, before recovery.
+    if (p.attack_ticks == 9) {
       int32_t dx = 720000 - p.x;
       if (h->enemy_hp && absolute(dx) < 65000 &&
           absolute(p.y - 448000) < 45000 &&
@@ -392,7 +399,11 @@ int32_t ec_v1_command(EC_Handle *h, int32_t op, int32_t a, int32_t b) {
   case 3:
     return ec_v1_set_peer_active(h, uint32_t(a), uint32_t(b));
   case 4:
-    if (b < 0 || uint32_t(b) > EC_MAX_MESSAGE)
+    h->staging_size = 0;
+    h->staging_count = 0;
+    for (auto &written : h->staging_written)
+      written = false;
+    if (b < 12 || uint32_t(b) > EC_MAX_MESSAGE)
       return EC_ERR_ARGUMENT;
     h->staging_size = uint32_t(b);
     h->staging_sender = uint32_t(a);
@@ -400,10 +411,20 @@ int32_t ec_v1_command(EC_Handle *h, int32_t op, int32_t a, int32_t b) {
   case 5:
     if (a < 0 || uint32_t(a) >= h->staging_size || b < 0 || b > 255)
       return EC_ERR_ARGUMENT;
+    if (!h->staging_written[uint32_t(a)]) {
+      h->staging_written[uint32_t(a)] = true;
+      h->staging_count++;
+    }
     h->staging[uint32_t(a)] = uint8_t(b);
     return EC_OK;
-  case 6:
-    return ec_v1_receive(h, h->staging_sender, h->staging, h->staging_size);
+  case 6: {
+    uint32_t size = h->staging_size;
+    // Finish consumes the stage, including failed attempts.
+    h->staging_size = 0;
+    if (!size || h->staging_count != size)
+      return reject(h, EC_ERR_MESSAGE);
+    return ec_v1_receive(h, h->staging_sender, h->staging, size);
+  }
   case 7:
     return h->message_count ? int32_t(h->messages[h->message_head].size) : 0;
   case 8:

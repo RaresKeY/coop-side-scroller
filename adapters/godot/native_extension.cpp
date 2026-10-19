@@ -11,6 +11,7 @@ GDExtensionInterfaceObjectMethodBindPtrcall method_ptrcall;
 GDExtensionMethodBindPtr notification;
 GDExtensionVariantFromTypeConstructorFunc from_int;
 GDExtensionTypeFromVariantConstructorFunc to_int;
+GDExtensionInterfaceVariantGetType variant_type;
 GDExtensionPtrDestructor destroy_name, destroy_string;
 // Godot's pinned 64-bit ABI stores String/StringName in one aligned pointer.
 struct alignas(8) Small {
@@ -51,17 +52,30 @@ void release(void *, GDExtensionClassInstancePtr ptr) {
   ec_v1_destroy(instance->core);
   instance->core = nullptr;
 }
+int32_t checked_command(Instance *instance, const int64_t *values) {
+  for (uint32_t i = 0; i < 3; i++)
+    if (values[i] < INT32_MIN || values[i] > INT32_MAX)
+      return EC_ERR_ARGUMENT;
+  return ec_v1_command(instance->core, int32_t(values[0]), int32_t(values[1]),
+                       int32_t(values[2]));
+}
 void call(void *, GDExtensionClassInstancePtr ptr,
           const GDExtensionConstVariantPtr *args, GDExtensionInt count,
           GDExtensionVariantPtr result, GDExtensionCallError *error) {
   int64_t output = EC_ERR_ARGUMENT;
   if (count == 3 && ptr) {
     int64_t values[3]{};
-    for (uint32_t i = 0; i < 3; i++)
+    for (uint32_t i = 0; i < 3; i++) {
+      if (variant_type(args[i]) != GDEXTENSION_VARIANT_TYPE_INT) {
+        error->error = GDEXTENSION_CALL_ERROR_INVALID_ARGUMENT;
+        error->argument = i;
+        error->expected = GDEXTENSION_VARIANT_TYPE_INT;
+        from_int(result, &output);
+        return;
+      }
       to_int(&values[i], const_cast<void *>(args[i]));
-    output =
-        ec_v1_command(static_cast<Instance *>(ptr)->core, int32_t(values[0]),
-                      int32_t(values[1]), int32_t(values[2]));
+    }
+    output = checked_command(static_cast<Instance *>(ptr), values);
     error->error = GDEXTENSION_CALL_OK;
   } else
     error->error = GDEXTENSION_CALL_ERROR_INVALID_ARGUMENT;
@@ -69,11 +83,11 @@ void call(void *, GDExtensionClassInstancePtr ptr,
 }
 void ptrcall(void *, GDExtensionClassInstancePtr ptr,
              const GDExtensionConstTypePtr *args, GDExtensionTypePtr result) {
+  const int64_t values[] = {*static_cast<const int64_t *>(args[0]),
+                            *static_cast<const int64_t *>(args[1]),
+                            *static_cast<const int64_t *>(args[2])};
   *static_cast<int64_t *>(result) =
-      ec_v1_command(static_cast<Instance *>(ptr)->core,
-                    int32_t(*static_cast<const int64_t *>(args[0])),
-                    int32_t(*static_cast<const int64_t *>(args[1])),
-                    int32_t(*static_cast<const int64_t *>(args[2])));
+      checked_command(static_cast<Instance *>(ptr), values);
 }
 void initialize(void *, GDExtensionInitializationLevel level) {
   if (level != GDEXTENSION_INITIALIZATION_SCENE)
@@ -145,6 +159,7 @@ extern "C" EC_API GDExtensionBool ember_core_extension_init(
       load<GDExtensionInterfaceObjectSetInstance>("object_set_instance");
   method_ptrcall = load<GDExtensionInterfaceObjectMethodBindPtrcall>(
       "object_method_bind_ptrcall");
+  variant_type = load<GDExtensionInterfaceVariantGetType>("variant_get_type");
   from_int = load<GDExtensionInterfaceGetVariantFromTypeConstructor>(
       "get_variant_from_type_constructor")(GDEXTENSION_VARIANT_TYPE_INT);
   to_int = load<GDExtensionInterfaceGetVariantToTypeConstructor>(

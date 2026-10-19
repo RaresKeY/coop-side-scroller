@@ -4,48 +4,8 @@ import argparse,base64,functools,http.server,json,os,signal,socket,struct,subpro
 from pathlib import Path
 from urllib.parse import urlparse
 ROOT=Path(__file__).resolve().parents[1]
-class CDP:
- def __init__(self,url):
-  u=urlparse(url);self.socket=socket.create_connection((u.hostname,u.port),timeout=15);self.sequence=0;self.errors=[]
-  key=base64.b64encode(os.urandom(16)).decode()
-  self.socket.sendall(f'GET {u.path} HTTP/1.1\r\nHost: {u.netloc}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n'.encode())
-  reply=b''
-  while not reply.endswith(b'\r\n\r\n'):reply+=self.read(1)
-  if b'101' not in reply:raise RuntimeError('CDP handshake failed')
- def read(self,size):
-  result=b''
-  while len(result)<size:
-   chunk=self.socket.recv(size-len(result))
-   if not chunk:raise RuntimeError('CDP closed')
-   result+=chunk
-  return result
- def call(self,method,params=None):
-  self.sequence+=1;request=self.sequence
-  raw=json.dumps({'id':request,'method':method,'params':params or {}}).encode();mask=os.urandom(4);size=len(raw)
-  header=bytes([0x81,0x80|size]) if size<126 else bytes([0x81,0xfe])+struct.pack('!H',size) if size<65536 else bytes([0x81,0xff])+struct.pack('!Q',size)
-  self.socket.sendall(header+mask+bytes(v^mask[i%4] for i,v in enumerate(raw)))
-  deadline=time.monotonic()+20
-  while time.monotonic()<deadline:
-   opcode,length=self.read(2);length&=127
-   if length==126:length=struct.unpack('!H',self.read(2))[0]
-   elif length==127:length=struct.unpack('!Q',self.read(8))[0]
-   data=json.loads(self.read(length))
-   if data.get('method')=='Runtime.consoleAPICalled' and data['params'].get('type')=='error':self.errors.append(data['params']['args'])
-   if data.get('method')=='Runtime.exceptionThrown':self.errors.append(data['params'])
-   if data.get('id')==request:
-    if 'error' in data:raise RuntimeError(data['error'])
-    return data.get('result',{})
-  raise TimeoutError(method)
- def evaluate(self,expression):
-  result=self.call('Runtime.evaluate',{'expression':expression,'returnByValue':True,'awaitPromise':True,'userGesture':True})
-  if 'exceptionDetails' in result:raise RuntimeError(result['exceptionDetails'])
-  return result.get('result',{}).get('value')
- def click(self,x,y):
-  for kind in ['mousePressed','mouseReleased']:self.call('Input.dispatchMouseEvent',{'type':kind,'x':x,'y':y,'button':'left','clickCount':1})
- def capture(self,path):path.write_bytes(base64.b64decode(self.call('Page.captureScreenshot',{'format':'png'})['data']))
-class QuietHandler(http.server.SimpleHTTPRequestHandler):
- def log_message(self,*args):pass
-parser=argparse.ArgumentParser();parser.add_argument('--url');args=parser.parse_args()
+from browser_cdp import CDP, QuietHandler
+parser=argparse.ArgumentParser();parser.add_argument('--url');parser.add_argument('--connection-setup',action='store_true');parser.add_argument('--animation-check',action='store_true');args=parser.parse_args()
 signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(SystemExit(143)))
 (ROOT/'build').mkdir(exist_ok=True)
 server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(QuietHandler,directory=str(ROOT/'build/web')))
@@ -81,6 +41,36 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
   after=page.evaluate('EmberCoreWeb.diagnostics()')['views'][0]
   assert after['tick']>before['tick'] and after['x']>before['x']+50000,(before,after)
   page.capture(ROOT/'build/web-gameplay.png')
+  if args.animation_check:
+   page.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'d','code':'KeyD','windowsVirtualKeyCode':68})
+   for _ in range(40):
+    if page.evaluate('EmberCoreWeb.diagnostics()')['views'][0]['x']>=670000:break
+    time.sleep(.1)
+   page.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'d','code':'KeyD','windowsVirtualKeyCode':68})
+   pose=page.evaluate('EmberCoreWeb.diagnostics()')['views'][0]
+   assert 655000<=pose['x']<710000,pose
+   page.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'w','code':'KeyW','windowsVirtualKeyCode':87})
+   time.sleep(.25)
+   page.capture(ROOT/'build/web-jump.png')
+   page.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'w','code':'KeyW','windowsVirtualKeyCode':87})
+   time.sleep(.55)
+   page.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'f','code':'KeyF','windowsVirtualKeyCode':70})
+   contact=None
+   for _ in range(20):
+    contact=page.evaluate('EmberCoreWeb.diagnostics()')['views'][0]
+    if contact['hp']<pose['hp']:break
+    time.sleep(.025)
+   page.capture(ROOT/'build/web-attack.png')
+   page.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'f','code':'KeyF','windowsVirtualKeyCode':70})
+   assert contact['hp']<pose['hp'],contact
+   print('GODOT WEB ANIMATION/COMBAT PASS',contact)
+  if args.connection_setup:
+   page.click(55,70) # Open Menu, then Host game.
+   time.sleep(.15)
+   page.click(110,212)
+   time.sleep(2)
+   page.capture(ROOT/'build/web-connection.png')
+   # Inspect this capture for setup/failure UI; this does not assert P2P success.
   assert not page.errors,page.errors
   print('GODOT WEB WASM PASS',{'before':before,'after':after,'origin':origin})
  finally:

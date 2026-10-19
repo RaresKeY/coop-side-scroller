@@ -73,6 +73,30 @@ int main() {
   assert(before.tick == after.tick &&
          before.players[0].x == after.players[0].x &&
          before.players[1].x == after.players[1].x);
+  // Staged receives require every byte, even after a prior complete message.
+  ec_v1_reset(host, 1, 1);
+  ec_v1_set_peer_active(host, 2, 1);
+  ec_v1_reset(guest, 2, 2);
+  ec_v1_tick(guest);
+  size = drain(guest, bytes);
+  assert(ec_v1_command(host, 6, 0, 0) == EC_ERR_MESSAGE);
+  assert(ec_v1_command(host, 4, 2, size) == EC_OK);
+  for (uint32_t i = 0; i < size; i++)
+    assert(ec_v1_command(host, 5, i, bytes[i]) == EC_OK);
+  assert(ec_v1_command(host, 6, 0, 0) == EC_OK);
+  assert(ec_v1_command(host, 6, 0, 0) == EC_ERR_MESSAGE);
+  bytes[8]++;
+  assert(ec_v1_command(host, 4, 2, size) == EC_OK);
+  for (uint32_t i = 0; i + 1 < size; i++) {
+    assert(ec_v1_command(host, 5, i, bytes[i]) == EC_OK);
+    assert(ec_v1_command(host, 5, i, bytes[i]) == EC_OK);
+  }
+  assert(ec_v1_command(host, 6, 0, 0) == EC_ERR_MESSAGE);
+  assert(ec_v1_receive(host, 2, bytes, size) == EC_OK);
+  assert(ec_v1_command(host, 4, 2, size) == EC_OK);
+  assert(ec_v1_command(host, 4, 2, 105) == EC_ERR_ARGUMENT);
+  assert(ec_v1_command(host, 5, 0, 0) == EC_ERR_ARGUMENT);
+  assert(ec_v1_command(host, 6, 0, 0) == EC_ERR_MESSAGE);
   // Sequence comparison accepts wraparound, but not a reordered prior packet.
   ec_v1_reset(host, EC_ROLE_HOST, 1);
   ec_v1_set_peer_active(host, 2, 1);
@@ -100,6 +124,47 @@ int main() {
   while (ec_v1_next_message(guest, bytes, sizeof bytes, &size) == EC_OK)
     messages++;
   assert(messages == 64);
+  // Damage lands on the strike frame, not the first anticipation frame.
+  ec_v1_reset(host, 1, 1);
+  ec_v1_set_local_input(host, 1000, 0);
+  for (int i = 0; i < 180; i++)
+    ec_v1_tick(host);
+  ec_v1_set_local_input(host, 0, EC_INPUT_ATTACK);
+  ec_v1_tick(host);
+  assert(view(host).players[0].attack_ticks == 24 && view(host).enemy_hp == 12);
+  for (int i = 0; i < 14; i++)
+    ec_v1_tick(host);
+  assert(view(host).enemy_hp == 12);
+  ec_v1_tick(host);
+  assert(view(host).players[0].attack_ticks == 9 && view(host).enemy_hp == 11);
+  ec_v1_set_local_input(host, 0, 0);
+  for (int i = 0; i < 13; i++)
+    ec_v1_tick(host);
+  assert(view(host).enemy_hp == 11);
+  // A held jump rises smoothly, falls faster, and a tap produces a lower arc.
+  int32_t heights[2]{};
+  for (int held = 0; held < 2; held++) {
+    ec_v1_reset(host, 1, 1);
+    int ascent = 0, descent = 0;
+    for (int t = 0; t < 60; t++) {
+      ec_v1_set_local_input(host, 0, (held || t == 0) ? EC_INPUT_JUMP : 0);
+      ec_v1_tick(host);
+      auto p = view(host).players[0];
+      if (448000 - p.y > heights[held])
+        heights[held] = 448000 - p.y;
+      if (!p.grounded) {
+        if (p.vy < 0)
+          ascent++;
+        else
+          descent++;
+      } else if (t > 0)
+        break;
+    }
+    assert(view(host).players[0].grounded);
+    if (held)
+      assert(ascent > descent && heights[held] > 50000);
+  }
+  assert(heights[0] < heights[1] / 2);
   ec_v1_destroy(host);
   ec_v1_destroy(guest);
   EC_Handle *all[32]{};

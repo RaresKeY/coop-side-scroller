@@ -6,7 +6,7 @@ An engine-independent C++17 co-op core with a versioned C ABI, native and WebAss
 
 [API and wire contract](specs/c-abi.md) · [Core architecture](specs/portable-core.md) · [Builds/targets](specs/build-targets.md) · [Unity/Unreal/custom-engine guidance](design/engine-integration.md)
 
-This is independent of another game's source. One CraftPix prototype saber fighter animates automatically while moving, jumping and attacking. The level is a plain single-screen floor of square CraftPix prototype tiles and one training dummy. No animation selection controls or Mangler's Fate code/assets are included.
+This is independent of another game's source. One CraftPix prototype saber fighter animates automatically while moving, jumping and attacking. The level is a plain single-screen floor of square CraftPix prototype tiles and one training dummy. The character is approximately two tiles tall; frame-aware attack regions/anchors keep the saber intact, and runtime shader sampling preserves the originals without enlarged texture copies. No animation selection controls or Mangler's Fate code/assets are included.
 
 ## Play
 
@@ -35,7 +35,7 @@ The local pair launches **two independent Godot processes** in separate windows.
 - Each game displays measured RTT, injected delay, actor count, packet counters, snapshot sequence/age and gaps. The controller shows each process PID and live telemetry. RTT is round-trip; guest snapshot age is time since its last received snapshot. Sequence gaps are observed missing snapshots, not a general network packet-loss percentage.
 - **Back to labs** or closing either game stops the owned pair. Closing the lab controller also stops its workers. No provider account, signaling service or relay is needed for loopback/LAN ENet testing.
 
-The lab is a native development tool. It does not prove browser WebRTC or internet NAT traversal. On two machines the remote route requires UDP reachability (LAN, an existing VPN, or suitable forwarding); relay remains deferred.
+The lab is a native development tool. It does not prove browser WebRTC or internet NAT traversal. On two machines the remote route requires UDP reachability (LAN, an existing VPN, or suitable forwarding); the native lab does not use browser TURN.
 
 Raw CraftPix art is excluded from public source. After core preparation/import, the source checkout renders a small original fallback character if licensed art is absent. To restore the licensed selection from your own library:
 
@@ -54,9 +54,11 @@ The web build uses WebRTC data channels. Host runs simulation; guest sends bound
 2. Guest: copy the received offer, Paste and accept, wait for the answer code, Copy my code and send it back.
 3. Host: copy the answer, Paste and accept. Wait for connection status. If clipboard permission is denied, paste into the lower field and use Accept pasted code.
 
-Browser P2P is experimental and not verified end to end: this workstation’s Chromium returned zero ICE candidates in both Godot and a separate plain WebRTC probe. The game reports this explicitly.
+Browser co-op is experimental. In Menu, enter your private playtest access code for Direct + relay fallback (default), or select Relay only to test TURN. Direct only requires no invitation. The [protected credential service](specs/turn-service.md) keeps the master key on the server and issues one-hour credentials.
 
-Keep both tabs active during setup. This manually replaces the signaling service, which is deferred. A public Google STUN endpoint is configured for address discovery; there is **no TURN relay**. Some NAT/firewall combinations will fail. Refresh or Solo resets a session. Codes contain temporary connection details; do not post them publicly.
+Both players must use the same code format; regenerate codes after updating. Old codes clear on reset, and answers must match the pending offer. Setup failures return to the menu with gathering/connection timeout guidance.
+
+Keep both tabs active during setup. This manually replaces the signaling service, which is deferred. Cloudflare provides STUN and TURN in relay modes; direct-only uses Google STUN. Restrictive networks may still fail. Start a new session before the one-hour credentials expire; automatic refresh is deferred. Refresh or Solo resets a session. Codes contain temporary connection details; do not post them publicly.
 
 Native Host/Join uses ENet on UDP 27840 for local/LAN development. Use the lab for simultaneous independent instances; the controller owns both workers inside one managed runtime, avoiding project-lock conflicts. Native ENet testing does not establish browser WebRTC or internet connectivity.
 
@@ -64,7 +66,7 @@ Native Host/Join uses ENet on UDP 27840 for local/LAN development. Use the lab f
 
 `./tools/build_web.sh` creates the current candidate in ignored `build/web/`. Serve it locally using `python3 -m http.server 8080 --directory build/web`. Export uses Compatibility rendering and disables threads, allowing ordinary HTTPS GitHub Pages hosting without custom isolation headers. The source branch excludes licensed raw art; the Pages branch contains only the exported playable game and notices. No account credentials belong in either branch. Explicit deployment uses `python3 tools/deploy_pages.py`; it only pushes the reviewed current web candidate to this project’s `gh-pages` branch.
 
-GitHub Pages is a static host, not a signaling or relay server. Firebase, Supabase and VPS options are assessed in [design/network-options.md](design/network-options.md). Deferred work is in [BACKLOG.md](BACKLOG.md).
+GitHub Pages is a static host, not a signaling or relay server. Read the [conventional NAT/relay/certificate study](design/internet-connectivity.md) for the internet architecture and validation gates. Firebase, Supabase and VPS options are assessed in [design/network-options.md](design/network-options.md). Deferred work is in [BACKLOG.md](BACKLOG.md).
 
 ## Standalone and tests
 
@@ -74,6 +76,8 @@ cmake --build build/cmake --parallel 2
 ctest --test-dir build/cmake --output-on-failure
 ./build/cmake/ember_standalone
 ./tests/core.sh
+./tests/animations.sh
+./tests/connections.sh
 ./tests/network.sh
 ./tests/lab.sh
 ./tools/build_web.sh
@@ -82,4 +86,4 @@ ctest --test-dir build/cmake --output-on-failure
 
 The core suite checks the C ABI, bounded buffers/queues, authority, malformed/stale packets, sanitizer coverage and a 600-tick native/Wasm byte trace. The lab verifies independent processes and replicated combat under delay; the browser smoke test drives real Godot input into Wasm. Test commands/tool requirements are in `specs/build-targets.md`.
 
-**Tested:** Linux native C/C++, Godot Linux reference, freestanding wasm32 and Godot Web/Chromium. **Documented possibilities only:** Unity, Unreal, other operating systems and custom engine adapters. The byte-identical test trace is not a general deterministic-lockstep guarantee. Prediction/interpolation, general engine collision integration, automatic signaling and relay deployment are deferred.
+**Tested:** Linux native C/C++, Godot Linux reference, freestanding wasm32 and Godot Web/Chromium. **Documented possibilities only:** Unity, Unreal, other operating systems and custom engine adapters. The byte-identical test trace is not a general deterministic-lockstep guarantee. Prediction/interpolation, general engine collision integration, automatic signaling, credential refresh and broader internet acceptance are deferred.

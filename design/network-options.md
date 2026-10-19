@@ -1,6 +1,8 @@
 # Connection service options
 
-Decision: static Godot Web game on GitHub Pages; direct WebRTC between a host and one guest. No deployed signaling or relay. Temporary manual connection-code exchange keeps the first experiment independent of provider accounts. Browser ENet is unavailable; the native UDP route is only a development aid.
+For the current conventional deployment recommendation, router/certificate details and verification gates, read [internet-connectivity.md](internet-connectivity.md).
+
+Decision: static Godot Web game on GitHub Pages; direct WebRTC between a host and one guest. Automatic signaling is deferred; a protected Cloudflare TURN issuer is now deployed (see [service contract](../specs/turn-service.md)). Temporary manual connection-code exchange keeps the first experiment independent of provider accounts. Browser ENet is unavailable; the native UDP route is only a development aid.
 
 | Option | Useful role | Limits / decision |
 | --- | --- | --- |
