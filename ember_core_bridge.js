@@ -15,7 +15,7 @@
       create: () => { const h = api.ec_v1_create(0x10000, 1, 1); if (h) handles.add(h); return h; },
       command: (handle, operation, a, b) => { calls++; return api.ec_v1_command(handle, operation, a, b); },
       destroy: (handle) => { api.ec_v1_destroy(handle); handles.delete(handle); },
-      diagnostics: () => ({calls, live: handles.size, views: [...handles].map(h => ({tick: api.ec_v1_command(h,10,0,0), x: api.ec_v1_command(h,10,3,1), hp: api.ec_v1_command(h,10,1,0)}))}),
+      diagnostics: () => ({calls, live: handles.size, views: [...handles].map(h => ({tick: api.ec_v1_command(h,10,0,0), x: api.ec_v1_command(h,10,3,1), guestX: api.ec_v1_command(h,10,3,2), actors: api.ec_v1_command(h,10,2,1) + api.ec_v1_command(h,10,2,2), hp: api.ec_v1_command(h,10,1,0)}))}),
     });
     return globalThis.EmberCoreWeb;
   })();
