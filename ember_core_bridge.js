@@ -1,6 +1,34 @@
 // Dependency-free, classic-script boot for the Godot Web reference adapter.
 // Core readiness is awaited before starting Godot; failures reach its loading notice.
 (() => {
+  // Retain only the latest engine peer; expose selected route metadata, never SDP/IPs.
+  let diagnosticPeer = null;
+  const BrowserRTC = globalThis.RTCPeerConnection;
+  if (BrowserRTC) globalThis.RTCPeerConnection = class extends BrowserRTC {
+    constructor(...args) {
+      super(...args);
+      diagnosticPeer = this;
+      this.addEventListener('connectionstatechange', () => {
+        if (this.connectionState === 'closed' && diagnosticPeer === this) diagnosticPeer = null;
+      });
+    }
+  };
+  globalThis.EmberConnectionDiagnostics = Object.freeze({
+    sample: async finish => {
+      try {
+        const peer = diagnosticPeer;
+        if (!peer || peer.connectionState !== 'connected') return;
+        const stats = await peer.getStats();
+        if (peer !== diagnosticPeer) return;
+        const transport = [...stats.values()].find(x => x.type === 'transport' && x.selectedCandidatePairId);
+        const pair = stats.get(transport?.selectedCandidatePairId);
+        if (!pair) return;
+        const local = stats.get(pair.localCandidateId), remote = stats.get(pair.remoteCandidateId);
+        const type = value => ['host', 'srflx', 'prflx', 'relay'].includes(value) ? value : 'unknown';
+        finish(JSON.stringify({local:type(local?.candidateType),remote:type(remote?.candidateType),protocol:['udp','tcp'].includes(local?.protocol)?local.protocol:'unknown',rtt:Math.min(2147483647,Math.max(0,Math.round((pair.currentRoundTripTime || 0)*1000)))}));
+      } catch { /* Diagnostics must never interrupt play. */ }
+    },
+  });
   const wasmURL = new URL('ember_core.wasm', document.currentScript.src);
   globalThis.EmberCoreWebReady = (async () => {
     const response = await fetch(wasmURL);
