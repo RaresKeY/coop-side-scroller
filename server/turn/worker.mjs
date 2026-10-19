@@ -139,7 +139,8 @@ export async function handle(request,env,fetcher) {
 export default {fetch:(request,env)=>handle(request,env)};
 
 // One SQLite Durable Object serializes the small private room directory.
-// No gameplay, account credentials, peer addresses or identity are stored here.
+// Rooms temporarily persist SDP/ICE, which can include peer addresses.
+// No gameplay or account credentials are stored here.
 const ROOM_IDLE_MS=90000, ROOM_LIFETIME_MS=600000, ROOM_LIMIT=32;
 const SEAT=/^[a-f0-9]{32}$/;
 const CODE=/^[A-F0-9]{8}$/;

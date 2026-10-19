@@ -1,6 +1,6 @@
 # Separate-network browser testing
 
-The game uses the dedicated controller at `~/workspace/tooling/runpod-browser` for automated Runpod testing. That independent project owns the controller implementation, image/template, credentials and pod lifecycle. Its `specs/` and CLI are the operator source of truth. The user's **Disposable Firefox Browser** desktop is a separate resource; do not control or delete it as part of this harness.
+The game uses the dedicated controller at `~/workspace/tooling/runpod-browser` for automated Runpod testing. That independent project owns the controller implementation, image/template, credentials and pod lifecycle. Its `specs/` and CLI are the operator source of truth. Operate only resources owned by this harness; preserve unrelated browser resources.
 
 ## Deployment and test sequence
 

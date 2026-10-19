@@ -59,6 +59,28 @@ class DeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Unexpected'):
                 deploy.candidate_hashes()
 
+    def test_candidate_rejects_stray_files_with_export_extensions(self):
+        for extra in ['notes.txt', 'raw-sprite.png', 'debug.js', 'other.wasm']:
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'SITE', Path(tmp)):
+                for name in deploy.REQUIRED | deploy.OPTIONAL:
+                    (Path(tmp) / name).write_text('candidate')
+                self.assertEqual(set(deploy.candidate_hashes()), deploy.REQUIRED | deploy.OPTIONAL)
+                (Path(tmp) / extra).write_text('unreviewed')
+                with self.assertRaisesRegex(RuntimeError, 'Unexpected'):
+                    deploy.candidate_hashes()
+
+    def test_failed_secret_audit_prevents_publication(self):
+        with patch.object(deploy.sys, 'argv', ['deploy_pages.py']), \
+             patch.object(deploy, 'publication_lock'), \
+             patch.object(deploy, 'git', return_value=deploy.DESTINATION), \
+             patch.object(deploy, 'api', return_value={'build_type': 'legacy', 'source': {'branch': 'gh-pages', 'path': '/'}}), \
+             patch.object(deploy, 'candidate_hashes', return_value={}), \
+             patch.object(deploy.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'audit')), \
+             patch.object(deploy, 'publish') as publish:
+            with self.assertRaises(subprocess.CalledProcessError):
+                deploy.main()
+            publish.assert_not_called()
+
     def test_publication_lock_excludes_second_owner(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'common_dir', return_value=Path(tmp)):
             with deploy.publication_lock():

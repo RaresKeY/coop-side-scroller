@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -21,6 +22,9 @@ URL = 'https://rareskey.github.io/coop-side-scroller/'
 REF = 'refs/heads/gh-pages'
 REQUIRED = {'index.html', 'index.js', 'index.pck', 'index.wasm', 'ember_core.wasm',
             'ember_core_bridge.js', 'build-info.json', '.nojekyll', 'THIRD_PARTY_NOTICES.txt'}
+
+OPTIONAL = {'index.png', 'index.icon.png', 'index.apple-touch-icon.png',
+            'index.audio.worklet.js', 'index.audio.position.worklet.js'}
 
 
 def git(*args, **kwargs):
@@ -54,9 +58,8 @@ def publication_lock(timeout=1200):
 
 def candidate_hashes():
     files = list(SITE.iterdir())
-    allowed = {'.html', '.js', '.pck', '.wasm', '.png', '.txt'}
     if any(p.is_symlink() or not p.is_file() or
-           (p.name not in {'.nojekyll', 'build-info.json'} and p.suffix not in allowed) for p in files):
+           p.name not in REQUIRED | OPTIONAL for p in files):
         raise RuntimeError('Unexpected candidate content')
     if not REQUIRED.issubset({p.name for p in files}):
         raise RuntimeError('Incomplete candidate; run tools/build_web.sh')
@@ -153,6 +156,8 @@ def main():
         if pages.get('build_type') != 'legacy' or pages.get('source') != {'branch': 'gh-pages', 'path': '/'}:
             raise RuntimeError('Unexpected Pages configuration')
         expected = candidate_hashes()
+        subprocess.run([sys.executable, str(ROOT / 'tools/audit_publication.py')],
+                       check=True, cwd=ROOT)
         commit = publish()
         wait_for_pages(commit, args.timeout)
         verify_hosted(commit, expected, min(args.timeout, 180))

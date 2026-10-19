@@ -24,11 +24,11 @@ C++ jump tuning is in [portable-core.md](portable-core.md). All 17 jump source f
 
 ## Runtime superscaling
 
-Pocket Salvage's scene preview was reviewed locally: it displays stored 8× nearest-replicated derivatives at one-eighth local scale with runtime linear filtering. This game uses the corresponding UV remap on the **original** texture in a small CanvasItem shader, followed by one explicit bilinear sample. It creates no enlarged PNGs/textures, full-scene supersampling target or additional full-screen pass. Frame bounds clamp samples to the selected atlas rectangle, and vertex tint is preserved without multiplying the source texture twice. Uniform bounds update only when a clip/frame changes.
+The reference sampling technique displays stored 8× nearest-replicated derivatives at one-eighth local scale with runtime linear filtering. This game uses the corresponding UV remap on the **original** texture in a small CanvasItem shader, followed by one explicit bilinear sample. It creates no enlarged PNGs/textures, full-scene supersampling target or additional full-screen pass. Frame bounds clamp samples to the selected atlas rectangle, and vertex tint is preserved without multiplying the source texture twice. Uniform bounds update only when a clip/frame changes.
 
 Sampling is scene-local to character sprites with linear filtering; imported mipmaps remain enabled and other texture/UI defaults remain unchanged. At ordinary/fractional magnification the shader emulates the narrow edge blend of an 8× nearest copy sampled linearly. This is pixel replication/filtering, not generated detail or a guarantee against minification aliasing. The source sheets total 3.875 MiB of RGBA texels before mipmaps; 8× copies would require 248 MiB for the same uncompressed texels. These are arithmetic storage budgets, not measured VRAM allocations or frame-time gains.
 
-Reference: [Godot CanvasItem shader built-ins](https://docs.godotengine.org/en/stable/tutorials/shaders/shader_reference/canvas_item_shader.html). No code or assets were copied from Pocket Salvage.
+Reference: [Godot CanvasItem shader built-ins](https://docs.godotengine.org/en/stable/tutorials/shaders/shader_reference/canvas_item_shader.html).
 
 ## Verification and retained evidence
 
