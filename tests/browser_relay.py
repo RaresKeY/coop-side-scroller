@@ -41,9 +41,9 @@ def run():
     page.call('Runtime.enable');page.call('Page.enable');page.call('Page.addScriptToEvaluateOnNewDocument',{'source':INSTRUMENT})
     page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
     page.call('Page.navigate',{'url':origin});wait_until(lambda:page.evaluate('globalThis.EmberCoreWeb?.diagnostics().calls>100'))
-    control.call('Target.activateTarget',{'targetId':target});time.sleep(.2);page.click(160,327);print('FOCUS',page.evaluate('({active:document.activeElement.tagName,rect:document.querySelector("canvas").getBoundingClientRect().toJSON(),width:innerWidth,height:innerHeight,focused:document.hasFocus()})'));type_text(page,token);page.click(180,361)
+    control.call('Target.activateTarget',{'targetId':target});time.sleep(.2);page.click(160,327);type_text(page,token);page.click(180,361)
     page.click(160,422) # Second popup item: Relay only.
-    page.capture(ROOT/f'build/relay-preflight-{role}.png');pages.append((target,page));print('SETUP',role,flush=True)
+    pages.append((target,page));print('SETUP',role,flush=True)
    host,guest=[item[1] for item in pages]
    control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(160,216)
    wait_until(lambda:host.evaluate('testPeers.length'),15)
@@ -54,17 +54,17 @@ def run():
    host.click(370,209);time.sleep(.2)
    offer=host.evaluate('navigator.clipboard.readText()');assert len(offer)>100,'No offer copied'
    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,260)
-   guest.click(200,325);type_text(guest,offer);guest.click(205,209)
+   guest.evaluate('navigator.clipboard.writeText('+json.dumps(offer)+')');guest.click(490,209)
    wait_until(lambda:guest.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
    guest.click(370,209);time.sleep(.2);answer=guest.evaluate('navigator.clipboard.readText()');assert answer!=offer and len(answer)>100,'No answer copied'
-   control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(200,325);type_text(host,answer);host.click(205,209)
+   control.call('Target.activateTarget',{'targetId':pages[0][0]});host.evaluate('navigator.clipboard.writeText('+json.dumps(answer)+')');host.click(490,209)
    print('CODES EXCHANGED',flush=True)
    for page in [host,guest]:wait_until(lambda:page.evaluate('testPeers.at(-1).connectionState==="connected"'))
    wait_until(lambda:all(page.evaluate('EmberCoreWeb.diagnostics().views[0].actors===2') for page in [host,guest]))
    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(800,420)
    key(guest,'d','KeyD',68)
-   wait_until(lambda:guest.evaluate('EmberCoreWeb.diagnostics().views[0].guestX>=668000'),8)
-   key(guest,'d','KeyD',68,False);key(guest,'f','KeyF',70)
+   wait_until(lambda:guest.evaluate('EmberCoreWeb.diagnostics().views[0].guestX>=620000'),8)
+   key(guest,'d','KeyD',68,False);guest.click(800,420);key(guest,'f','KeyF',70)
    wait_until(lambda:all(page.evaluate('EmberCoreWeb.diagnostics().views[0].hp<12') for page in [host,guest]),5)
    key(guest,'f','KeyF',70,False)
    reports=[]

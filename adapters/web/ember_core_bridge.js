@@ -20,3 +20,22 @@
     return globalThis.EmberCoreWeb;
   })();
 })();
+
+// Browser clipboard fallback stays outside simulation. execCommand preserves
+// Firefox's native Copy path where asynchronous Clipboard API access is denied.
+globalThis.EmberClipboard = Object.freeze({
+  copy: (text) => {
+    if (typeof text !== 'string' || text.length > 65536) return false;
+    const previous = document.activeElement;
+    const field = document.createElement('textarea');
+    field.value = text;
+    field.setAttribute('readonly', '');
+    field.style.cssText = 'position:fixed;left:-10000px;top:0;';
+    document.body.appendChild(field);
+    let copied = false;
+    try { field.select(); copied = document.execCommand('copy'); }
+    catch { copied = false; }
+    finally { field.value = ''; field.remove(); previous?.focus(); }
+    return copied;
+  },
+});

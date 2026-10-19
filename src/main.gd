@@ -323,7 +323,12 @@ func paste_signal():
 
 func copy_signal():
  if signal_out.text != "":
-  DisplayServer.clipboard_set(signal_out.text)
+  if OS.has_feature("web"):
+   var browser_clipboard = JavaScriptBridge.get_interface("EmberClipboard")
+   if browser_clipboard == null or not browser_clipboard.copy(signal_out.text):
+    status.text = "Copy blocked • select the upper code and use your browser’s Copy command"
+    return
+  else: DisplayServer.clipboard_set(signal_out.text)
   status.text = "Code copied • send privately to partner"
 
 func rtc_offer():

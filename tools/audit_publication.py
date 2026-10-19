@@ -7,7 +7,7 @@ import base64,json,os,subprocess,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 AUDITOR=r'''
-import sys,json,base64,re
+import sys,json,base64,re,tomllib
 from pathlib import Path
 secrets=set()
 def collect(value):
@@ -18,6 +18,9 @@ def collect(value):
  elif isinstance(value,list):
   for item in value: collect(item)
 for path in Path('/config').glob('*.json'): collect(json.loads(path.read_text()))
+if Path('/runpod-config.toml').is_file(): collect(tomllib.loads(Path('/runpod-config.toml').read_text()))
+for path in Path('/test-config').glob('*.json'): collect(json.loads(path.read_text()))
+secrets.update(base64.b64encode(value) for value in list(secrets))
 if not secrets: raise SystemExit('No private comparison values found; refusing an incomplete audit.')
 patterns=[rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\r\n]+[A-Za-z0-9+/=\r\n]{64,}-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',rb'github_pat_[A-Za-z0-9_]{40,}',rb'gh[pousr]_[A-Za-z0-9]{30,}',rb'AKIA[A-Z0-9]{16}',rb'AIza[A-Za-z0-9_-]{35}']
 findings=set();chunks=0
@@ -33,6 +36,8 @@ def main():
  if config.is_symlink() or config.stat().st_mode&0o077: raise SystemExit('Private config permissions invalid.')
  receipt=json.loads((ROOT.parent/'tooling/cloudflare-api/.local/image.json').read_text())
  command=['podman','run','--rm','--pull=never','--network=none','--read-only','--cap-drop=all','--security-opt=no-new-privileges','--pids-limit=32','--memory=128m','--userns=keep-id','--user',f'{os.getuid()}:{os.getgid()}','--label','io.rareskey.project=coop-side-scroller','--label','io.rareskey.purpose=publication-audit','--volume',f'{config}:/config:ro,Z','--interactive','--entrypoint','python',receipt['image_id'],'-c',AUDITOR]
+ for source,target in [(Path.home()/'.runpod/config.toml','/runpod-config.toml'),(Path.home()/'.config/ember-coop-testing','/test-config')]:
+  if source.exists():command[command.index('--entrypoint'):command.index('--entrypoint')]=['--volume',f'{source}:{target}:ro,Z']
  process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
  def send(stream,size,label):
   tail=b''
