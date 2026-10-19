@@ -25,3 +25,9 @@ Timeout/failure messages distinguish gathering failure from direct-connection fa
 ## Evidence
 
 `tests/connections.sh` exercises envelope round trips, incompatible/malformed/oversized fields, fractional ICE indices, stale-code cleanup, invalid/unsolicited/mismatched answer rejection, simulated ICE states and gathering/connect/disconnect deadlines, established-connection grace, indefinite host answer waiting, and failure return to setup. These simulated states do not test NAT traversal. Native network/lab checks cover retained ENet behavior. `tests/web.sh --connection-setup` additionally captures actual browser Host setup; this captures setup rather than asserting connectivity. Web export and Chromium smoke checks cover browser startup/gameplay; The two-window actual Godot relay test passes movement/combat with independent Wasm cores and selected relay/relay candidates; separate-network acceptance is tracked separately in the service spec.
+
+## Clipboard and browser test HUD
+
+Browser copying waits for Clipboard API acknowledgement. If that API rejects or does not settle within five seconds, a small browser-native dialog requests a direct Copy click; its synchronous compatibility fallback is limited to that user action. Cancel/Escape/reset clears the private code and restores focus. The dialog never stores or logs the code. Ordinary paste denial still points to the lower input field.
+
+Relay-only test mode shows RTT, actor count, shared dummy HP, core tick, RPC counters and snapshot age/sequence. Ordinary browser play hides this debug panel; the native independent-process lab is unchanged. These are application ping timings, distinct from ICE candidate-pair RTT.

@@ -53,6 +53,8 @@ var signal_in: TextEdit
 var signal_panel: VBoxContainer
 var clipboard_callback
 var clipboard_error
+var clipboard_copy_callback
+var clipboard_copy_pending := false
 var setup_menu: PanelContainer
 var requested_address := "127.0.0.1"
 var capture_at := -1.0
@@ -142,6 +144,7 @@ func _ready():
  if lab_role != "":
   menu_button.hide()
   help.text = "A/D move · W jump · F attack" if lab_role == "host" else "Left/Right move · Up jump · L attack"
+ if lab_role != "" or OS.has_feature("web"):
   debug_label = Label.new()
   var debug_panel = PanelContainer.new()
   debug_panel.position = Vector2(12,466)
@@ -322,13 +325,23 @@ func paste_signal():
   rtc_accept()
 
 func copy_signal():
- if signal_out.text != "":
-  if OS.has_feature("web"):
-   var browser_clipboard = JavaScriptBridge.get_interface("EmberClipboard")
-   if browser_clipboard == null or not browser_clipboard.copy(signal_out.text):
-    status.text = "Copy blocked • select the upper code and use your browser’s Copy command"
-    return
-  else: DisplayServer.clipboard_set(signal_out.text)
+ if signal_out.text == "" or clipboard_copy_pending: return
+ if OS.has_feature("web"):
+  var browser_clipboard = JavaScriptBridge.get_interface("EmberClipboard")
+  if browser_clipboard == null:
+   status.text = "Clipboard unavailable • select the upper code and use your browser’s Copy command"
+   return
+  var generation = connection_generation
+  clipboard_copy_pending = true
+  clipboard_copy_callback = JavaScriptBridge.create_callback(func(args):
+   clipboard_copy_pending = false
+   if generation != connection_generation: return
+   status.text = "Code copied • send privately to partner" if args.size()>0 and args[0]==true else "Copy blocked • select the upper code and use your browser’s Copy command"
+  )
+  status.text = "Copying connection code…"
+  browser_clipboard.copy(signal_out.text,clipboard_copy_callback)
+ else:
+  DisplayServer.clipboard_set(signal_out.text)
   status.text = "Code copied • send privately to partner"
 
 func rtc_offer():
@@ -404,6 +417,9 @@ func _process(_dt):
 
 func reset_network():
  connection_generation += 1
+ if OS.has_feature("web"):
+  var browser_clipboard = JavaScriptBridge.get_interface("EmberClipboard")
+  if browser_clipboard != null: browser_clipboard.cancel()
  rtc_issuing = false
  if multiplayer.multiplayer_peer:
   multiplayer.multiplayer_peer.close()
@@ -578,6 +594,11 @@ func _physics_process(dt):
  flush_packets()
  if tick % 60 == 0 and mode != "solo":
   for peer_id in multiplayer.get_peers(): queue_packet("ping",[peer_id,Time.get_ticks_msec()])
+ if OS.has_feature("web") and debug_label != null:
+  debug_label.get_parent().visible = mode != "solo" and rtc_route_mode == 1 and not signal_panel.visible and not setup_menu.visible
+  if tick % 15 == 0:
+   var age = Time.get_ticks_msec()-last_snapshot_ms if last_snapshot_ms > 0 else -1
+   debug_label.text = "RTT %s ms / actors %d / dummy HP %d / tick %d\nTX %d RX %d / snapshot %d / age %d ms" % [str(rtt) if rtt>=0 else "--",players.size(),enemy_hp,core.command(10,0),tx,rx,snapshot_seq if mode=="host" else last_snapshot_seq,age]
  var typing = get_viewport().gui_get_focus_owner() is TextEdit or get_viewport().gui_get_focus_owner() is LineEdit
  var keys = LabKeys.read_keys()
  var axis = float(keys.d or keys.right)-float(keys.a or keys.left)
