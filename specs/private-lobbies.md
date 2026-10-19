@@ -1,6 +1,6 @@
 # Private playtest lobbies
 
-Owners: `src/private_lobby.gd`, browser menus in `src/main.gd`, `server/turn/worker.mjs` (`PrivateLobbies`), `server/turn/lobby.test.mjs` and `tests/browser_relay.py --lobby`.
+Owners: `src/private_lobby.gd`, browser menus in `src/main.gd`, `server/turn/worker.mjs` (`PrivateLobbies`), `server/turn/lobby.test.mjs` `tests/browser_relay.py --lobby` and `tests/browser_lobby_cross_network.py`.
 
 ## User flow
 
@@ -48,6 +48,21 @@ deno test --no-config server/turn/worker.test.mjs server/turn/lobby.test.mjs
 gamescope --backend headless -W 960 -H 540 -w 960 -h 540 --xwayland-count 1 -- python3 tests/browser_relay.py --lobby
 ```
 
-Thirteen offline Worker tests cover auth/origin/expiry, concurrent joins, capacity, idempotent creation, membership isolation, malformed/immutable signals, session mismatch, lease/alarm cleanup, connected deletion, migration and all 32 rooms carrying near-maximum-size signals. Live two-window Chromium lobby→relay movement/combat passes with independent cores, relay/relay candidates, bidirectional bytes and shared HP 12→11 (126–149 ms ICE RTT in the first run). This verifies the deployed SQLite binding as well as automatic signaling. Previous separate-network manual-pairing acceptance remains historical; a new cross-network/Firefox lobby run is not claimed.
+Thirteen offline Worker tests cover auth/origin/expiry, concurrent joins, capacity, idempotent creation, membership isolation, malformed/immutable signals, session mismatch, lease/alarm cleanup, connected deletion, migration and all 32 rooms carrying near-maximum-size signals. Live two-window Chromium lobby→relay movement/combat passes with independent cores, relay/relay candidates, bidirectional bytes and shared HP 12→11 (126–149 ms ICE RTT in the first run). This verifies the deployed SQLite binding as well as automatic signaling. The separate-network lobby result below extends this acceptance; Firefox remains unverified.
 
 Provider references: [SQLite value limits](https://developers.cloudflare.com/durable-objects/platform/limits/), [SQLite storage and alarms](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [migration contracts](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/), [plan availability](https://developers.cloudflare.com/durable-objects/platform/pricing/). SQLite Durable Objects are available on Workers Free; actual usage still needs monitoring.
+
+
+## Separate-network lobby acceptance
+
+On 2026-10-19, `tests/browser_lobby_cross_network.py` passed against public Pages `8cf749d` with the deployed protected lobby backend. A hardware-rendered workstation Chromium host and the owned Runpod Chrome 141 controller guest entered the playtest key through the new native DOM field, used Create/Join, and connected without copying connection descriptions. Both selected relay/relay candidates under relay-only policy; ICE RTT was 218 ms / 228 ms. Independent Wasm cores replicated guest movement, guest attacks (HP 12→9) and subsequent host movement. Final sampled positions matched on both: host x=230994 and guest x=673618 milli-pixels. Both-ready signaling cleanup completed before gameplay verification, proving the connected session no longer depended on its directory entry.
+
+Full-scene directory, join and connected captures were visually inspected. The host renderer was NVIDIA RTX 2080 Ti; remote rendering was intentional Mesa llvmpipe. Safe JSON, screenshots and hosted hashes remain ignored evidence under `build/lobby-cross-network*`. The separate controller pod was deleted after recovery; the user's manual Firefox pod was preserved. Firefox, direct-path fallback, UDP-blocked/TCP-only networks, reconnect and the broader browser/network matrix remain unverified.
+
+Run only after explicitly deploying the controller as documented in [Runpod agent browser](../design/runpod-agent-browser.md):
+
+```sh
+gamescope --backend headless -W 960 -H 540 -w 960 -h 540 --xwayland-count 1 -- python3 tests/browser_lobby_cross_network.py
+```
+
+The harness owns no cloud lifecycle. It selects only its captured room ID, detects old Godot versus new native DOM key entry, and waits for the directory response to reach the Godot UI before clicking Create. It never captures credentials or SDP in reports. Check `build/lobby-cross-network-latest.json` for the current result: Gamescope can exit successfully even when its child test fails. The last successful report is retained separately. Preflight failure reporting was checked to mark the new attempt failed without erasing historical evidence.

@@ -100,4 +100,13 @@ Run from the game checkout after explicit controller deployment:
 gamescope --backend headless -W 960 -H 540 -w 960 -h 540 --xwayland-count 1 -- python3 tests/browser_cross_network.py
 ```
 
-The harness does not own deployment/deletion. Remove the owned disposable pod afterward with `python3 manage.py delete` in the controller project. The original manual Firefox desktop remains a separate stopped resource. Automated copying is captured in memory; this does not verify the Firefox remote clipboard, general NAT reachability, direct routes, or blocked-UDP/TLS-only relay. Automatic signaling is still deferred.
+The harness does not own deployment/deletion. Remove the owned disposable pod afterward with `python3 manage.py delete` in the controller project. The manual Firefox desktop remains a separate user-owned resource; inspect its current status and preserve it. Automated copying is captured in memory; this does not verify the Firefox remote clipboard, general NAT reachability, direct routes, or blocked-UDP/TLS-only relay. Private lobby signaling is now deployed and tested as described below.
+
+
+## Automatic lobby cross-network test
+
+`tests/browser_lobby_cross_network.py` exercises the public private-room UI instead of exchanging offer/reply codes. It uses the same controller receipt and explicit deploy/delete lifecycle. Run it under the Gamescope command above with that filename. It supports both the original Godot access field and the newer native DOM key-entry dialog. It creates its own room and joins only that room's captured ID, then checks independent cores, room cleanup, forced-relay routing, guest combat and movement in both directions.
+
+The 2026-10-19 run against Pages `8cf749d` passed: relay/relay on both, ICE RTT 218–228 ms, HP 12→9 on both and matching final positions. Native DOM access entry was used on both browsers. The full-scene captures were visually inspected. See [private lobby acceptance](../specs/private-lobbies.md#separate-network-lobby-acceptance) for evidence and limitations. The owned controller pod `n2sfsl0xy7g2nj` was deleted afterward; manual Firefox pod `7whu5iynn96q3d` remained running and untouched.
+
+Reports are sanitized: `build/lobby-cross-network-latest.json` records the current attempt and `build/lobby-cross-network.json` retains the last success. Inspect the report rather than relying on Gamescope's process status. No browser-controller key, playtest key, TURN credential, SDP or candidate address belongs in these files. No Firefox or general NAT-reliability claim follows from this Chrome test.
