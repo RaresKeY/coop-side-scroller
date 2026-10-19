@@ -64,7 +64,7 @@ Native Host/Join uses ENet on UDP 27840 for local/LAN development. Use the lab f
 
 ## Static site
 
-`./tools/build_web.sh` creates the current candidate in ignored `build/web/`. Serve it locally using `python3 -m http.server 8080 --directory build/web`. Export uses Compatibility rendering and disables threads, allowing ordinary HTTPS GitHub Pages hosting without custom isolation headers. The source branch excludes licensed raw art; the Pages branch contains only the exported playable game and notices. No account credentials belong in either branch. Explicit deployment uses `python3 tools/deploy_pages.py`; it only pushes the reviewed current web candidate to this project’s `gh-pages` branch.
+`./tools/build_web.sh` creates the current candidate in ignored `build/web/`. Serve it locally using `python3 -m http.server 27841 --bind 127.0.0.1 --directory build/web`. Export uses Compatibility rendering and disables threads, allowing ordinary HTTPS GitHub Pages hosting without custom isolation headers. The source branch excludes licensed raw art; the Pages branch contains only the exported playable game and notices. No account credentials belong in either branch. Explicit deployment uses `python3 tools/deploy_pages.py`; it only pushes the reviewed current web candidate to this project’s `gh-pages` branch.
 
 GitHub Pages is a static host, not a signaling or relay server. Read the [conventional NAT/relay/certificate study](design/internet-connectivity.md) for the internet architecture and validation gates. Firebase, Supabase and VPS options are assessed in [design/network-options.md](design/network-options.md). Deferred work is in [BACKLOG.md](BACKLOG.md).
 

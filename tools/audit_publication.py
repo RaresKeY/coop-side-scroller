@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit all local Git blobs, public source candidates and Web export before publication.
+"""Audit all local Git objects, public source candidates and Web export before publication.
 Known Cloudflare secret values are read/compared only in an offline container.
 No secret values, source content or private files are printed or copied to source.
 """

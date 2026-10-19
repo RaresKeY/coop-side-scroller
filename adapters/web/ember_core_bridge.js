@@ -26,6 +26,59 @@ globalThis.EmberClipboard = (() => {
   let cancel = null;
   return Object.freeze({
     cancel: () => { if (cancel) cancel(); },
+    paste: (titleText, finish) => {
+      if (cancel) return;
+      const previous = document.activeElement;
+      const overlay = document.createElement('div');
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-label', titleText);
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#17212d;color:#fff;display:grid;place-items:center;font:16px sans-serif;';
+      const panel = document.createElement('div');
+      panel.style.cssText = 'width:min(560px,calc(100vw - 48px));padding:16px;';
+      const title = document.createElement('h2');
+      title.textContent = titleText;
+      const hint = document.createElement('p');
+      hint.textContent = 'Paste the entire code below (Ctrl+V). On a remote desktop, use its Clipboard panel first.';
+      const field = document.createElement('textarea');
+      field.setAttribute('aria-label', titleText);
+      field.dataset.emberPaste = '';
+      field.maxLength = 65536;
+      field.spellcheck = false;
+      field.style.cssText = 'box-sizing:border-box;width:100%;height:140px;font:14px monospace;';
+      const accept = document.createElement('button');
+      accept.textContent = 'Continue';
+      accept.dataset.emberAccept = '';
+      accept.disabled = true;
+      const close = document.createElement('button');
+      close.textContent = 'Cancel';
+      for (const button of [accept, close]) button.style.cssText = 'min-height:44px;padding:8px 20px;margin:12px 12px 0 0;';
+      field.oninput = () => { accept.disabled = !field.value.trim(); };
+      const done = value => {
+        field.value = '';
+        overlay.remove();
+        cancel = null;
+        previous?.focus();
+        finish(value);
+      };
+      cancel = () => done('');
+      accept.onclick = () => done(field.value.trim());
+      close.onclick = cancel;
+      overlay.onkeydown = event => {
+        event.stopPropagation();
+        if (event.key === 'Escape') { event.preventDefault(); done(''); }
+        if (event.key === 'Tab') {
+          event.preventDefault();
+          const focus = [field, accept, close].filter(x => !x.disabled);
+          const next = (focus.indexOf(document.activeElement) + (event.shiftKey ? focus.length - 1 : 1)) % focus.length;
+          focus[next].focus();
+        }
+      };
+      panel.append(title, hint, field, accept, close);
+      overlay.append(panel);
+      document.body.append(overlay);
+      field.focus();
+    },
     copy: (text, finish) => {
       if (typeof text !== 'string' || !text || text.length > 65536 || cancel) { finish(false); return; }
       let settled = false, overlay = null, timer = null;
@@ -64,26 +117,25 @@ globalThis.EmberClipboard = (() => {
         close.textContent = 'Cancel';
         close.dataset.emberCancel = '';
         close.style.cssText = 'min-height:44px;padding:8px 20px;';
+        const field = document.createElement('textarea');
+        field.value = text;
+        field.setAttribute('readonly', '');
+        field.setAttribute('aria-label', 'Your connection code');
+        field.style.cssText = 'box-sizing:border-box;width:100%;height:100px;margin-bottom:16px;';
         copy.onclick = () => {
           // Compatibility fallback runs synchronously in the trusted DOM click.
-          const field = document.createElement('textarea');
-          field.value = text;
-          field.setAttribute('readonly', '');
-          field.style.cssText = 'position:fixed;left:-10000px;top:0;';
-          document.body.appendChild(field);
           let copied = false;
           try { field.select(); copied = document.execCommand('copy'); }
           catch { copied = false; }
-          finally { field.value = ''; field.remove(); }
-          if (copied) done(true);
-          else { hint.textContent = 'Copy was blocked. Cancel and select the code in the setup screen.'; copy.focus(); }
+          if (copied) { field.value = ''; done(true); }
+          else { hint.textContent = 'Select the code above and use Ctrl+C or your browser’s Copy command.'; field.focus(); field.select(); }
         };
         close.onclick = () => done(false);
         overlay.onkeydown = event => {
           if (event.key === 'Escape') { event.preventDefault(); done(false); }
           if (event.key === 'Tab') { event.preventDefault(); (document.activeElement === copy ? close : copy).focus(); }
         };
-        panel.append(title, hint, copy, close);
+        panel.append(title, hint, field, copy, close);
         overlay.append(panel);
         document.body.append(overlay);
         copy.focus();

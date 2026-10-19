@@ -16,7 +16,7 @@ Host generates a new 128-bit random session identifier for each offer. Guest ech
 
 ## Failure behavior
 
-Check initialize/create-peer/create-offer/local-description/remote-description/candidate-add return codes. On failure, close the session, return to solo with setup visible and show the reason. Do not leave stale outbound codes available to copy.
+Check initialize/create-peer/create-offer/local-description/remote-description/candidate-add return codes. On failure, close the session and return to solo simulation. Browser pairing stays visible with the reason and a Start again action; native setup returns to its menu. Do not leave stale outbound codes available to copy.
 
 Use adapter monotonic milliseconds: gathering must finish with a non-empty candidate list within 30 seconds; after accepting a remote description, connection has 60 seconds; an established connection reporting disconnected has a 10-second recovery grace. Explicit failed/closed state ends the attempt. A host waiting for the user to return an answer does not time out merely because the offer was copied some time ago. Automatic reconnect/ICE restart is deferred. WebRTC timeout handling does not use the native ENet timeout branch.
 
@@ -31,3 +31,11 @@ Timeout/failure messages distinguish gathering failure from direct-connection fa
 Browser copying waits for Clipboard API acknowledgement. If that API rejects or does not settle within five seconds, a small browser-native dialog requests a direct Copy click; its synchronous compatibility fallback is limited to that user action. Cancel/Escape/reset clears the private code and restores focus. The dialog never stores or logs the code. Ordinary paste denial still points to the lower input field.
 
 Relay-only test mode shows RTT, actor count, shared dummy HP, core tick, RPC counters and snapshot age/sequence. Ordinary browser play hides this debug panel; the native independent-process lab is unchanged. These are application ping timings, distinct from ICE candidate-pair RTT.
+
+## Guided manual pairing
+
+Host creates its invitation automatically; Join cannot create an offer. Each side sees a two-step instruction and role-specific Copy invitation/Copy reply and Enter guest reply/Enter host invitation actions. Copy is disabled until ICE gathering finishes; guest entry is disabled once its reply is generated. Role mismatches reject before applying SDP. Raw encoded codes are hidden in the browser UI; the versioned wire envelope is unchanged.
+
+Entering a code opens a focused browser-native textarea with Continue/Cancel. This uses ordinary browser paste, not async Clipboard API reads or Godot's cached clipboard. Remote desktop users can first transfer text through their desktop clipboard panel. Copy fallback exposes a selectable read-only textarea as well as its direct Copy button. Reset cancels open dialogs; private code contents are not saved, logged or put in URLs.
+
+This remains a manual two-way exchange and does not prevent ICE failure while the guest waits for the host to accept its reply. A guided UI is not a substitute for signaling. Short room codes, automatic offer/answer exchange and retry/re-signaling require an expiring protected signaling service; they are deferred in BACKLOG.md. Cross-network Firefox acceptance is still unverified.

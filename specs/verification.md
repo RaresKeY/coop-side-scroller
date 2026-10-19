@@ -24,3 +24,13 @@ Review verification also checks that freshness validation blocks while the publi
 Live forced-relay game acceptance: `tests/browser_relay.py` runs two actual Godot browser windows and independent Wasm cores, uses the real masked invitation/menu and Copy/Paste controls, checks relay-only configuration and selected relay/relay candidates, replicated movement and guest attack (both HP 11), with bidirectional traffic and 132–180 ms RTT in one run. Separate windows avoid background-tab suspension. The hosted Pages build 8da90b8 is built; HTML/PCK/core Wasm/bridge hashes match the audited candidate, and hosted real-keyboard movement/jump/attack passes (HP 11).
 
 Browser clipboard fallback: `tests/web.sh --clipboard-check` forces asynchronous clipboard denial, then verifies real trusted-DOM copying, initial focus, cancellation and cleanup at 1920×1080, 1280×720, 960×540 and 854×480. All four full-screen fallback captures were visually inspected. Game controls and the native UI remain engine-owned; the narrow DOM dialog exists solely for browser clipboard activation. Chrome pass does not by itself prove Firefox clipboard integration.
+
+### Guided pairing UI review (2026-10-19)
+
+VERDICT: NEEDS CHANGES for end-to-end separate-network acceptance; local guided UI checks pass.
+
+Scope: Godot browser Host/Join, native DOM code entry and clipboard-denial fallback. The old screenshot showed simultaneous generic offer/accept/copy/paste controls and two large unlabeled code fields. The replacement uses role-specific steps, hidden raw fields, a focused native paste dialog and an explicit retry panel. Wrong-role codes reject before SDP application. Core/native lab/animation contracts are preserved.
+
+Verification: headless `res://tests/connection_codes.gd` passes; `tests/web.sh --clipboard-check` passes actual trusted copy, native DOM text entry, focus, cancellation and cleanup at 1920×1080, 1280×720, 960×540 and 854×480. `tests/browser_relay.py` passes two actual independent Godot Web cores through relay/relay candidates, movement and replicated HP 12→11, with candidate RTT 147–157 ms in this run. Host pairing captures were taken at all four sizes; smallest/largest Host and smallest native paste/copy dialogs were visually inspected. The first updated combat harness stopped just outside attack range; its approach threshold was corrected and the complete test then passed.
+
+Unverified: the new flow in Runpod Firefox, separate-network pairing, mobile and controller input. Runpod was stopped at the user's request. Manual signaling still allows ICE failure while waiting for the reply, so this UI change is not a proven cure for the reported connection failure. Short-code automatic signaling remains deferred.

@@ -51,6 +51,17 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
    page.evaluate("globalThis.copyResult=null;EmberClipboard.copy('public-cancel-probe',success=>copyResult=success);true")
    time.sleep(.1);page.evaluate('EmberClipboard.cancel();true')
    assert page.evaluate("copyResult===false && !document.querySelector('[role=dialog]')"),'Cancelled code retained'
+   for width,height in [(1920,1080),(1280,720),(960,540),(854,480)]:
+    page.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':False})
+    page.evaluate("globalThis.pasteResult=null;EmberClipboard.paste('Enter host invitation',value=>pasteResult=value);true")
+    assert page.evaluate("document.activeElement===document.querySelector('[data-ember-paste]')"),'Paste field not focused'
+    page.call('Input.insertText',{'text':'public-paste-probe'})
+    bounds=page.evaluate("(()=>{const r=document.querySelector('[data-ember-accept]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
+    page.capture(ROOT/f'build/paste-{width}.png')
+    page.click(bounds['x'],bounds['y'])
+    assert page.evaluate("pasteResult==='public-paste-probe' && !document.querySelector('[role=dialog]')"),'Native paste input/cleanup failed'
+   page.evaluate("globalThis.pasteResult=null;EmberClipboard.paste('Cancel probe',value=>pasteResult=value);EmberClipboard.cancel();true")
+   assert page.evaluate("pasteResult==='' && !document.querySelector('[role=dialog]')"),'Cancelled paste retained'
    page.evaluate("Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:globalThis.nativeWrite});true")
    page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
    print('BROWSER CLIPBOARD FALLBACK PASS: 1920,1280,960,854; real copy, focus, cancel and cleanup')

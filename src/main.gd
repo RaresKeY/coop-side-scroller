@@ -51,8 +51,12 @@ var rtc_route_mode := 2
 var signal_out: TextEdit
 var signal_in: TextEdit
 var signal_panel: VBoxContainer
+var pairing_role := ""
+var pairing_hint: Label
+var pairing_copy: Button
+var pairing_paste: Button
+var pairing_retry: Button
 var clipboard_callback
-var clipboard_error
 var clipboard_copy_callback
 var clipboard_copy_pending := false
 var setup_menu: PanelContainer
@@ -162,16 +166,26 @@ func _ready():
  signal_panel.position = Vector2(16,125)
  signal_panel.visible = false
  canvas.add_child(signal_panel)
- var explanation = Label.new()
- explanation.text = "Connection codes are private • relay access is set in Menu.\n1 Host: Create offer -> send code.  2 Guest: paste -> Accept.\n3 Guest sends answer. Host pastes -> Accept. Wait for Connected."
- signal_panel.add_child(explanation)
+ pairing_hint = Label.new()
+ pairing_hint.custom_minimum_size = Vector2(700,0)
+ pairing_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+ signal_panel.add_child(pairing_hint)
  var actions = HBoxContainer.new()
  signal_panel.add_child(actions)
- for item in [["Create offer",rtc_offer],["Accept pasted code",rtc_accept],["Copy my code",copy_signal],["Paste and accept",paste_signal]]:
-  var button = Button.new()
-  button.text = item[0]
-  button.pressed.connect(item[1])
-  actions.add_child(button)
+ pairing_copy = Button.new()
+ pairing_copy.pressed.connect(copy_signal)
+ actions.add_child(pairing_copy)
+ pairing_paste = Button.new()
+ pairing_paste.pressed.connect(paste_signal)
+ actions.add_child(pairing_paste)
+ pairing_retry = Button.new()
+ pairing_retry.text = "Start again"
+ pairing_retry.pressed.connect(func():
+  if pairing_role == "host": host()
+  else: join_game()
+ )
+ actions.add_child(pairing_retry)
+ for button in [pairing_copy,pairing_paste,pairing_retry]: button.custom_minimum_size.y = 40
  signal_out = TextEdit.new()
  signal_out.custom_minimum_size = Vector2(700,66)
  signal_out.editable = false
@@ -181,6 +195,10 @@ func _ready():
  signal_in.custom_minimum_size = Vector2(700,66)
  signal_in.placeholder_text = "Paste partner’s code here"
  signal_panel.add_child(signal_in)
+ # Raw codes remain available to native tests, but browser pairing uses a normal
+ # DOM text field so nested remote desktops need no Clipboard API permission.
+ signal_out.visible = false
+ signal_in.visible = false
  solo()
  setup_menu.visible = lab_role == ""
  if lab_role != "":
@@ -228,9 +246,26 @@ func style_button(button: Button):
   button.add_theme_stylebox_override(pair[0],style)
 
 func rtc_fail(message: String):
+ var role = pairing_role
  solo()
- setup_menu.show()
+ if OS.has_feature("web") and role != "":
+  pairing_role = role
+  signal_panel.show()
+  pairing_copy.disabled = true
+  pairing_paste.disabled = true
+  pairing_hint.text = "Could not connect. Start again and exchange fresh codes.\nBoth players must finish: host invitation → guest reply → host accepts reply."
+ else: setup_menu.show()
  status.text = message
+
+func show_pairing(role: String):
+ pairing_role = role
+ pairing_copy.text = "Copy invitation" if role == "host" else "Copy reply"
+ pairing_paste.text = "Enter guest reply" if role == "host" else "Enter host invitation"
+ pairing_copy.disabled = true
+ pairing_paste.disabled = role == "host"
+ pairing_hint.text = "HOST · 1 of 2\nPreparing your invitation…" if role == "host" else "JOIN · 1 of 2\nEnter the invitation from your host. You will then send a reply back."
+ setup_menu.hide()
+ signal_panel.show()
 
 func request_relay_credentials(generation: int) -> Dictionary:
  var code = relay_access.text.strip_edges()
@@ -312,14 +347,14 @@ func rtc_begin(server: bool, session: String = "") -> bool:
 
 func paste_signal():
  if OS.has_feature("web"):
+  var generation = connection_generation
   clipboard_callback = JavaScriptBridge.create_callback(func(args):
+   if generation != connection_generation or args.size() == 0 or str(args[0]) == "": return
    signal_in.text = str(args[0])
    rtc_accept()
   )
-  clipboard_error = JavaScriptBridge.create_callback(func(_args): status.text = "Clipboard permission denied • paste into lower field instead")
-  var navigator = JavaScriptBridge.get_interface("navigator")
-  var promise = navigator.clipboard.readText()
-  promise.then(clipboard_callback).catch(clipboard_error)
+  var helper = JavaScriptBridge.get_interface("EmberClipboard")
+  helper.paste("Enter guest reply" if pairing_role == "host" else "Enter host invitation",clipboard_callback)
  else:
   signal_in.text = DisplayServer.clipboard_get()
   rtc_accept()
@@ -336,7 +371,10 @@ func copy_signal():
   clipboard_copy_callback = JavaScriptBridge.create_callback(func(args):
    clipboard_copy_pending = false
    if generation != connection_generation: return
-   status.text = "Code copied • send privately to partner" if args.size()>0 and args[0]==true else "Copy blocked • select the upper code and use your browser’s Copy command"
+   var copied = args.size()>0 and args[0]==true
+   status.text = "Copied • send to your partner" if copied else "Copy cancelled • try again"
+   if copied:
+    pairing_hint.text = "HOST · 2 of 2\nSend the invitation to your guest. Then enter their reply here." if pairing_role == "host" else "JOIN · 2 of 2\nSend this reply to your host now. Keep this page open while they accept it."
   )
   status.text = "Copying connection code…"
   browser_clipboard.copy(signal_out.text,clipboard_copy_callback)
@@ -354,6 +392,12 @@ func rtc_accept():
  if data.is_empty():
   status.text = "Invalid/incompatible code • use a fresh code from the same game version"
   return
+ if pairing_role == "client" and data.type != "offer":
+  status.text = "That is a reply. Ask your host for an invitation."
+  return
+ if pairing_role == "host" and data.type != "answer":
+  status.text = "That is an invitation. Enter your guest’s reply instead."
+  return
  if data.type == "offer":
   if not await rtc_begin(false,data.session): return
  elif rtc == null or mode != "host" or local_signal.get("session") != data.session or rtc.get_signaling_state() != WebRTCPeerConnection.SIGNALING_STATE_HAVE_LOCAL_OFFER:
@@ -370,6 +414,9 @@ func rtc_accept():
    rtc_fail("Could not accept connection candidate: " + error_string(error))
    return
  rtc_connect_ms = Time.get_ticks_msec()
+ if data.type == "answer":
+  pairing_hint.text = "HOST · Connecting\nGuest reply accepted. Keep both pages open."
+  pairing_paste.disabled = true
  status.text = "Connecting • relay only" if rtc_route_mode == 1 else "Connecting • direct / relay fallback" if rtc_route_mode == 0 else "Connecting directly • relay disabled"
 
 func rtc_update(now: int):
@@ -405,6 +452,9 @@ func rtc_update(now: int):
      rtc_fail("Generated connection code exceeds prototype limits • automatic signaling deferred")
      return
     signal_out.text = code
+    pairing_copy.disabled = false
+    pairing_paste.disabled = mode != "host"
+    pairing_hint.text = "HOST · 1 of 2\nCopy your invitation and send it to your guest. Then enter their reply." if mode == "host" else "JOIN · 2 of 2\nCopy your reply and send it to the host now. They must accept it to connect."
     if state != WebRTCPeerConnection.STATE_CONNECTED:
      status.text = "Connection code ready • send privately to partner"
 
@@ -463,6 +513,7 @@ func solo():
  setup_menu.hide()
  signal_panel.hide()
  reset_network()
+ pairing_role = ""
  mode = "solo"
  core.configure(1)
  sync_core_view()
@@ -471,7 +522,7 @@ func solo():
 func host():
  setup_menu.hide()
  if OS.has_feature("web"):
-  signal_panel.show()
+  show_pairing("host")
   rtc_offer()
   return
  reset_network()
@@ -490,8 +541,9 @@ func host():
 func join_game():
  setup_menu.hide()
  if OS.has_feature("web"):
-  signal_panel.show()
-  status.text = "Paste host offer into connection codes, then Accept"
+  solo()
+  show_pairing("client")
+  status.text = "Join your host"
   return
  reset_network()
  var peer = ENetMultiplayerPeer.new()

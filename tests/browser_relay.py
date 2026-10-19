@@ -23,6 +23,11 @@ def type_text(page,text):
   for kind in ['keyDown','keyUp']:
    page.call('Input.dispatchKeyEvent',{'type':kind,'key':char,'text':char if kind=='keyDown' else '', 'windowsVirtualKeyCode':ord(char.upper())})
  time.sleep(.15)
+def enter_code(page,text):
+ wait_until(lambda:page.evaluate("!!document.querySelector('[data-ember-paste]')"),3)
+ page.call('Input.insertText',{'text':text})
+ bounds=page.evaluate("(()=>{const r=document.querySelector('[data-ember-accept]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
+ page.click(bounds['x'],bounds['y'])
 def run():
  token=json.loads((Path.home()/'.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
  server=http.server.ThreadingHTTPServer(('127.0.0.1',27841),functools.partial(QuietHandler,directory=str(ROOT/'build/web')))
@@ -50,20 +55,25 @@ def run():
    wait_until(lambda:host.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
    assert host.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay','Relay-only UI selection failed'
    print('HOST RELAY READY',flush=True)
+   for width,height in [(1920,1080),(1280,720),(960,540),(854,480)]:
+    host.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':False})
+    time.sleep(.15);host.capture(ROOT/f'build/pairing-host-{width}.png')
+   host.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
+
    # Godot's actual Copy/Paste buttons exchange its versioned codes in memory.
-   host.click(370,209);time.sleep(.2)
+   host.click(90,185);time.sleep(.2)
    offer=host.evaluate('navigator.clipboard.readText()');assert len(offer)>100,'No offer copied'
    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,260)
-   guest.evaluate('navigator.clipboard.writeText('+json.dumps(offer)+')');guest.click(490,209)
+   guest.click(240,185);enter_code(guest,offer)
    wait_until(lambda:guest.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
-   guest.click(370,209);time.sleep(.2);answer=guest.evaluate('navigator.clipboard.readText()');assert answer!=offer and len(answer)>100,'No answer copied'
-   control.call('Target.activateTarget',{'targetId':pages[0][0]});host.evaluate('navigator.clipboard.writeText('+json.dumps(answer)+')');host.click(490,209)
+   guest.click(90,185);time.sleep(.2);answer=guest.evaluate('navigator.clipboard.readText()');assert answer!=offer and len(answer)>100,'No answer copied'
+   control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(240,185);enter_code(host,answer)
    print('CODES EXCHANGED',flush=True)
    for page in [host,guest]:wait_until(lambda:page.evaluate('testPeers.at(-1).connectionState==="connected"'))
    wait_until(lambda:all(page.evaluate('EmberCoreWeb.diagnostics().views[0].actors===2') for page in [host,guest]))
    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(800,420)
    key(guest,'d','KeyD',68)
-   wait_until(lambda:guest.evaluate('EmberCoreWeb.diagnostics().views[0].guestX>=620000'),8)
+   wait_until(lambda:guest.evaluate('EmberCoreWeb.diagnostics().views[0].guestX>=640000'),8)
    key(guest,'d','KeyD',68,False);guest.click(800,420);key(guest,'f','KeyF',70)
    wait_until(lambda:all(page.evaluate('EmberCoreWeb.diagnostics().views[0].hp<12') for page in [host,guest]),5)
    key(guest,'f','KeyF',70,False)

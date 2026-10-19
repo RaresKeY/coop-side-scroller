@@ -42,6 +42,17 @@ func scene_checks():
  scene.signal_in.text = "stale answer"
  scene.solo()
  check(scene.signal_out.text.is_empty() and scene.signal_in.text.is_empty(),"Old codes survived reset")
+ scene.show_pairing("host")
+ var invitation = {"game":"ember-coop","version":1,"protocol":1,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]}
+ scene.signal_in.text = Codes.encode(invitation)
+ scene.rtc_accept()
+ check(scene.rtc == null and scene.status.text.begins_with("That is an invitation"),"Host accepted its own invitation")
+ scene.show_pairing("client")
+ invitation.type = "answer"
+ scene.signal_in.text = Codes.encode(invitation)
+ scene.rtc_accept()
+ check(scene.rtc == null and scene.status.text.begins_with("That is a reply"),"Guest accepted a reply as an invitation")
+ scene.solo()
  scene.signal_in.text = "invalid"
  scene.rtc_accept()
  check(scene.rtc == null and scene.status.text.begins_with("Invalid/incompatible"),"Invalid code changed session")
