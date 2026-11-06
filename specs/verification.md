@@ -206,3 +206,5 @@ Release verified: game/source `8397e5aba94aa2a09b68550e0b6778def8a1ed10`, clean 
 ## Local player marker correction — 2026-11-06
 
 The original downward yellow triangle is restored above the local character. Color, perspective/ownership, position/reset and speech-tail geometry are preserved. Existing snapshot-presentation integration passes12 checks; this small presentation correction adds no new tests. Reuse prepared native/Wasm/Godot tools on General x86, no Runpod. Exact release and hosted startup/input/screenshot verification follow in the milestone handoff.
+
+Local clean candidate `9e76f1d2780d4ee0c74dba42af61af9894e51ef3`, payload `660f36dc6eb24e93f6f6b8d1f5ad1ee9573e12cfdd69c319c7473b54679b1fab`, passed actual Chromium startup, keyboard movement and runtime-console checks. The screenshot confirms the restored triangle. Native12 checks, publication audit and11 deployment tests pass. Public deployment and hosted verification remain pending workstation authentication; current hosted game remains the preceding speech-tail release. Evidence `.local/player-marker-20261106/` and workstation `coop-live-20261106/player-marker/`.
