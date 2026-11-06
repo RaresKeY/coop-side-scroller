@@ -113,6 +113,28 @@ func run():
  gc._input(input);gc.entry.text="draft"
  input.keycode=KEY_ESCAPE;gc._input(input)
  check(not gc.composing and hc.history.size()==3,"Escape sent a draft")
+ # Multiline editing keeps Enter-to-send and native Unicode bounds.
+ check(Chat.clean_text("first\r\nsecond",200,true)=="first\nsecond","CRLF paste was not normalized")
+ check(Chat.clean_text("first\tsecond",200,true).is_empty(),"Multiline chat accepted other controls")
+ input.keycode=KEY_ENTER;gc._input(input)
+ gc.entry.insert_text_at_caret("a".repeat(201))
+ await process_frame;await process_frame
+ check(gc.entry.text.length()==200 and gc.entry.size.y<=84.1,"Native draft escaped character/height bounds: length=%d height=%.2f" % [gc.entry.text.length(),gc.entry.size.y])
+ check(gc.entry.get_v_scroll_bar().max_value>gc.entry.get_v_scroll_bar().page,"Long native draft does not scroll")
+ input.shift_pressed=true
+ gc._input(input)
+ check(gc.composing and hc.history.size()==3,"Shift+Enter submitted the draft")
+ gc.entry.text="First line\nSecond line"
+ input.shift_pressed=false;gc.clock+=1000;hc.clock+=1000
+ gc._input(input)
+ check(not gc.composing and hc.history.back().text=="First line\nSecond line" and gc.history.back().text==hc.history.back().text,"Multiline message/echo was lost")
+ hc.clock+=1000;gc.clock+=1000
+ var many_lines = "a\n".repeat(70)+"last"
+ check(hc.submit(many_lines),"Line-heavy bounded message rejected")
+ await process_frame;await process_frame
+ hc.update_positions();gc.update_positions()
+ check(hc.history.back().text==many_lines and gc.history.back().text==many_lines,"History truncated multiline content")
+ check(hc.bubbles[1].node.size.y<200 and gc.bubbles[1].node.size.y<200,"Line-heavy speech escaped its height cap")
  for i in 110:
   hc.clock+=1000;gc.clock+=1000;hc.submit("History line %03d" % i)
  await process_frame;await process_frame

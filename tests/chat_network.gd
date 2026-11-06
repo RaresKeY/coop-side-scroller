@@ -10,10 +10,10 @@ class Session extends "res://src/main.gd":
  func _physics_process(dt):
   super._physics_process(dt)
   if not sent and chat.names==["Terra","Rae"]:
-   sent=chat.submit("Hello from "+player_name)
+   sent=chat.submit("Hello from "+player_name+"\nReady to go.")
   if chat.history.size()==2:
    var texts=chat.history.map(func(message): return message.text)
-   if "Hello from Terra" in texts and "Hello from Rae" in texts and chat.bubbles.size()==2:
+   if "Hello from Terra\nReady to go." in texts and "Hello from Rae\nReady to go." in texts and chat.bubbles.size()==2:
     if success_at<0:
      print("CHAT REAL ENET PASS ",role," names=",chat.names," echoes=",chat.history.size())
      success_at=elapsed

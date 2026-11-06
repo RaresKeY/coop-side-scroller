@@ -10,7 +10,7 @@ signal outgoing(peer: int, packet: Dictionary)
 var game
 var panel: PanelContainer
 var log_view: RichTextLabel
-var entry: LineEdit
+var entry: TextEdit
 var footer: Label
 var composing := false
 var names := ["", ""]
@@ -32,12 +32,13 @@ var composer_callback
 var composer_rect := Rect2()
 var compose_generation := 0
 
-static func clean_text(value, limit: int) -> String:
+static func clean_text(value, limit: int, multiline := false) -> String:
  if not value is String: return ""
- var text: String = value.strip_edges()
+ var text: String = (value.replace("\r\n","\n") if multiline else value).strip_edges()
  if text.is_empty() or text.length() > limit or text.to_utf8_buffer().size() > limit*4: return ""
  for i in text.length():
   var code = text.unicode_at(i)
+  if multiline and code == 10: continue
   if code < 32 or (code >= 127 and code < 160) or (code >= 0x202a and code <= 0x202e) or (code >= 0x2066 and code <= 0x2069): return ""
  return text
 
@@ -94,16 +95,20 @@ func setup(owner_game, canvas):
  log_view.add_theme_font_size_override("normal_font_size",14)
  log_view.add_theme_color_override("default_color",Color("e6e6e6"))
  column.add_child(log_view)
- entry = LineEdit.new()
+ entry = TextEdit.new()
  entry.name = "ChatInput"
  entry.placeholder_text = "Message…"
- entry.max_length = MAX_TEXT
+ entry.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+ entry.text_changed.connect(entry_changed)
+ entry.resized.connect(func():
+  if composing and browser_composer == null: call_deferred("size_native_entry"))
  entry.add_theme_font_size_override("font_size",14)
  entry.custom_minimum_size.y = 28
  entry.hide()
  column.add_child(entry)
  footer = Label.new()
  footer.text = "Enter to chat"
+ footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
  footer.add_theme_font_size_override("font_size",12)
  footer.add_theme_color_override("font_color",Color("b8b8b8"))
  column.add_child(footer)
@@ -126,6 +131,8 @@ func _input(event):
   if composing:
    if browser_composer != null:
     browser_composer.focus()
+   elif event.shift_pressed:
+    return # TextEdit inserts the newline; plain Enter still submits.
    elif submit(entry.text):
     entry.clear()
     finish_composing()
@@ -133,17 +140,34 @@ func _input(event):
    composing = true
    entry.show()
    if browser_composer == null: entry.grab_focus()
-   footer.text = "Enter to send · Esc to cancel"
+   footer.text = "Enter send · Shift+Enter new line · Esc close"
    if browser_composer != null: call_deferred("open_browser_composer")
    publish_observation()
   get_viewport().set_input_as_handled()
+
+func entry_changed():
+ if entry.text.length()>MAX_TEXT:
+  var line = entry.get_caret_line()
+  var column = entry.get_caret_column()
+  entry.text = entry.text.left(MAX_TEXT)
+  entry.set_caret_line(mini(line,entry.get_line_count()-1))
+  entry.set_caret_column(column)
+ if browser_composer == null: call_deferred("size_native_entry")
+
+func size_native_entry():
+ if not composing: return
+ var style = entry.get_theme_stylebox("normal")
+ entry.custom_minimum_size.y = clampf(entry.get_total_visible_line_count()*entry.get_line_height()+style.get_minimum_size().y,28,84)
 
 func open_browser_composer():
  if not composing or browser_composer == null: return
  var generation = compose_generation
  composer_callback = JavaScriptBridge.create_callback(func(args):
   if not composing or generation != compose_generation or args.size()<2: return
-  if str(args[0]) == "cancel": finish_composing()
+  if str(args[0]) == "resize":
+   var height = float(args[1])
+   if is_finite(height): entry.custom_minimum_size.y = clampf(height,28,84)
+  elif str(args[0]) == "cancel": finish_composing()
   elif str(args[0]) == "send" and submit(str(args[1])): finish_composing()
  )
  browser_composer.open(composer_callback,MAX_TEXT)
@@ -161,6 +185,7 @@ func finish_composing():
  compose_generation += 1
  if browser_composer != null: browser_composer.close()
  composing = false
+ entry.custom_minimum_size.y = 28
  entry.clear()
  entry.release_focus()
  entry.hide()
@@ -240,7 +265,7 @@ func receive(sender: int, packet: Dictionary):
    if not packet.id is int or packet.id<=seen_id or packet.id>0x7fffffff: return
    if not packet.slot is int or packet.slot not in [1,2]: return
    var author = clean_text(packet.name,MAX_NAME)
-   var text = clean_text(packet.text,MAX_TEXT)
+   var text = clean_text(packet.text,MAX_TEXT,true)
    if author.is_empty() or author != names[packet.slot-1] or text.is_empty(): return
    seen_id = packet.id
    append_message(packet.id,packet.slot,author,text)
@@ -257,7 +282,7 @@ func receive(sender: int, packet: Dictionary):
  elif kind == "submit":
   if not shape(packet,["v","kind","session","id","text"]) or not guest_named: return
   if not packet.id is int or packet.id<=seen_client_id or packet.id>0x7fffffff: return
-  var text = clean_text(packet.text,MAX_TEXT)
+  var text = clean_text(packet.text,MAX_TEXT,true)
   if text.is_empty(): return
   var now = now_ms()
   # Permit legitimate reliable messages bunched by network delay, while
@@ -270,7 +295,7 @@ func receive(sender: int, packet: Dictionary):
   broadcast(2,names[1],text)
 
 func submit(value: String) -> bool:
- var text = clean_text(value,MAX_TEXT)
+ var text = clean_text(value,MAX_TEXT,true)
  if text.is_empty():
   footer.text = "Use 1–%d characters" % MAX_TEXT
   return false
@@ -324,8 +349,11 @@ func append_message(id: int, slot: int, author: String, text: String):
  label.mouse_filter = Control.MOUSE_FILTER_IGNORE
  label.add_theme_font_size_override("font_size",14)
  label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+ # Keep speech within the arena even when a 200-character message has many lines.
+ label.max_lines_visible = 8
+ label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
  var font = label.get_theme_font("font")
- label.custom_minimum_size.x = clampf(font.get_string_size(text,HORIZONTAL_ALIGNMENT_LEFT,-1,14).x,56,216)
+ label.custom_minimum_size.x = clampf(font.get_multiline_string_size(text,HORIZONTAL_ALIGNMENT_LEFT,-1,14).x,56,216)
  bubble.add_child(label)
  game.add_child(bubble)
  bubbles[slot] = {"node":bubble,"until":now_ms()+clampi(4000+text.length()*30,4000,10000)}

@@ -303,36 +303,58 @@ globalThis.EmberClipboard = (() => {
 
 // Inline browser input keeps IME/paste native while Godot draws the RPG history.
 (() => {
-  let field = null, previous = null, bounds = null, canvasObserver = null;
+  let field = null, previous = null, bounds = null, canvasObserver = null, resized = null, requestedHeight = 0;
+  const fit = (editing = false) => {
+    if (!field || !bounds) return;
+    const rect = document.querySelector('canvas')?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    const scale = rect.height / bounds[5], savedScroll = field.scrollTop;
+    // Measure wrapping at the actual browser font/width, then reserve matching
+    // engine space. Four lines remain visible; longer drafts scroll internally.
+    field.style.height = '0px';
+    const bottom = Math.min(rect.bottom ?? rect.top + rect.height, globalThis.innerHeight ?? Infinity);
+    const cap = Math.max(1, Math.min(84 * scale, 80 * scale + 2, bottom - parseFloat(field.style.top) - 2));
+    const height = Math.min(cap, Math.max(28 * scale, field.scrollHeight + 2));
+    field.style.height = `${height}px`;
+    field.scrollTop = editing && field.selectionEnd === field.value.length ? field.scrollHeight : savedScroll;
+    const logical = height / scale;
+    if (Math.abs(logical - requestedHeight) > 0.5) {
+      requestedHeight = logical;
+      resized?.('resize', logical);
+    }
+  };
   const place = () => {
     if (!field || !bounds) return;
     const canvas = document.querySelector('canvas');
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const [x, y, w, h, vw, vh] = bounds;
-    Object.assign(field.style, {left: `${rect.left+x*rect.width/vw}px`, top: `${rect.top+y*rect.height/vh}px`,
-      width: `${w*rect.width/vw}px`, height: `${h*rect.height/vh}px`, fontSize: `${14*rect.height/vh}px`, visibility: 'visible'});
+    const [x, y, w, , vw, vh] = bounds, sx = rect.width/vw, sy = rect.height/vh;
+    Object.assign(field.style, {left: `${rect.left+x*sx}px`, top: `${rect.top+y*sy}px`,
+      width: `${w*sx}px`, fontSize: `${14*sy}px`, lineHeight: `${18*sy}px`,
+      padding: `${4*sy}px ${6*sx}px`, visibility: 'visible'});
+    fit();
     if (!field.dataset.placed) { field.dataset.placed = 'true'; field.focus(); }
   };
   globalThis.EmberChatComposer = Object.freeze({
     open(finish, limit) {
       if (field || typeof finish !== 'function' || limit !== 200) return;
-      previous = document.activeElement;
-      field = document.createElement('input');
-      field.type = 'text'; field.maxLength = limit; field.autocomplete = 'off';
+      previous = document.activeElement; resized = finish;
+      field = document.createElement('textarea');
+      field.rows = 1; field.wrap = 'soft'; field.maxLength = limit; field.autocomplete = 'off';
       field.setAttribute('aria-label', 'Chat message'); field.dataset.emberChat = '';
       field.placeholder = 'Message…';
-      field.style.cssText = 'position:fixed;z-index:9000;visibility:hidden;box-sizing:border-box;color:#e6e6e6;background:#191b20;border:1px solid #777;border-radius:2px;padding:3px 6px;font-family:sans-serif;';
+      field.style.cssText = 'position:fixed;z-index:9000;visibility:hidden;box-sizing:border-box;color:#e6e6e6;background:#191b20;border:1px solid #777;border-radius:2px;font-family:sans-serif;resize:none;overflow-x:hidden;overflow-y:auto;overflow-wrap:anywhere;overscroll-behavior:contain;';
+      field.oninput = () => fit(true);
+      field.onwheel = event => event.stopPropagation();
       field.onkeydown = event => {
         event.stopPropagation();
         if (event.isComposing) return;
-        if (event.key === 'Enter') { event.preventDefault(); finish('send', field.value); }
+        if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); finish('send', field.value); }
         if (event.key === 'Escape') { event.preventDefault(); finish('cancel', ''); }
       };
       // Key releases may still clear keys held before the composer opened.
       document.body.append(field);
       // Godot can resize the canvas after the window resize event has fired.
-      // Observe its layout so a composing field follows that later change too.
       const canvas = document.querySelector('canvas');
       if (canvas && typeof ResizeObserver === 'function') {
         canvasObserver = new ResizeObserver(place);
@@ -348,7 +370,7 @@ globalThis.EmberClipboard = (() => {
     close() {
       canvasObserver?.disconnect(); canvasObserver = null;
       if (field) { field.value = ''; field.remove(); field = null; }
-      bounds = null; previous?.focus(); previous = null;
+      bounds = null; resized = null; requestedHeight = 0; previous?.focus(); previous = null;
     },
   });
   globalThis.addEventListener?.('resize', place);
