@@ -87,17 +87,24 @@ globalThis.probe = {
     if (channel?.readyState !== 'open') throw new Error('DataChannel not open');
     clearInterval(interval);
     next = peer.stats().local_through; target = next; sent = next;
+    let clock = 0;
     interval = setInterval(() => {
       try {
         if (error || channel.readyState !== 'open' || channel.bufferedAmount > 65536) return;
+        clock++;
         if (target < end) target++;
-        if (next < end) { next++; check(peer.input(next, ...controls(next, slot)), 'input'); }
+        // Bound capture while stalled; retry the same tick if history is full.
+        if (next < end && next < peer.stats().confirmed_tick + 120) {
+          const result = peer.input(next + 1, ...controls(next + 1, slot));
+          if (result !== -6) { check(result, 'input'); next++; }
+        }
         check(peer.advance(target), 'advance'); drain();
         const stats = peer.stats();
         if (target % 2 === 0 || target === end) {
           const count = Math.min(8, next - sent); send(count ? sent + 1 : 0, count); sent += count;
         }
-        if (target % 12 === 0 && stats.peer_ack < next)
+        // Transport time keeps advancing after the simulation reaches its target.
+        if (clock % 12 === 0 && stats.peer_ack < next)
           send(stats.peer_ack + 1, Math.min(8, next - stats.peer_ack));
         document.querySelector('#status').textContent = `Player ${slot}: ${stats.confirmed_tick}/${end} confirmed`;
       } catch (e) { error = String(e); clearInterval(interval); }

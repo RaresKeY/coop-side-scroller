@@ -1,9 +1,8 @@
-# Verification
+# Verification and acceptance
 
 ## General x86 networking review — 2026-11-06
 
-The [current review receipt](../reviews/networking-2026-11-06.md) records native/Wasm and cross-compiler contracts, 19 offline service tests, four CTests, 13 interpolation checks, seven real-main/animation-clock checks, CDP/HTTP regressions, actual same-machine ENet and browser WebRTC recovery, and NVIDIA Godot/WebGL verification. All ran on General x86; no Runpod or live TURN service was used. [Snapshot presentation](snapshot-presentation.md) owns the new behavior. The clone uses fallback art; private art, independent networks, phone/human acceptance and the full Godot Web room flow remain unverified.
- and acceptance
+The [current review receipt](../reviews/networking-2026-11-06.md) records native/Wasm and cross-compiler contracts, 19 offline service tests, four CTests, 13 interpolation checks, seven real-main/animation-clock checks, CDP/HTTP regressions, actual same-machine ENet and browser WebRTC recovery, and NVIDIA Godot/WebGL verification. All ran on General x86; no Runpod or live TURN service was used. A follow-up pass repaired browser retransmission after a stopped target and bounded capture during outages. The full deterministic suite, two new real-Wasm scheduling regressions, 27 Worker/lobby/diagnostics tests and actual local headless Chromium with a 5.5-second injected blackout plus final-packet loss passed. Native-reference checks reached ticks 599/840/1080 with no desync or dropped events. [Snapshot presentation](snapshot-presentation.md) owns render behavior; [deterministic co-op](deterministic-coop.md) owns the experiment. The clone uses fallback art; private art, independent networks, phone/human acceptance and the full Godot Web room flow remain unverified.
 
 Recorded evidence as of **2026-10-21**. This is a consolidated record of completed checks, not a claim that every suite was rerun for each documentation change. Implementation contracts live in the focused specs; commands and requirements are in [builds and targets](build-targets.md).
 

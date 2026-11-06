@@ -13,6 +13,8 @@ The review covered host/replica and deterministic wire/authority/checkpoint boun
 | CDP's 15-second socket timeout could hide the page's 20-second ICE error | Whole-operation deadlines and a 30-second page-evaluation budget | Two fragmented/timeout socket regressions |
 | The probe required a display and external STUN even for isolated local protocol work | Explicit headless/local-only modes, loopback candidates and fixture permissions; default GPU gate retained | Real Chromium WebRTC convergence/recovery |
 | Relocated Debian Clang could not find wasm-ld-19 | Add the matching project-local linker alias | Full native/Wasm build and parity |
+| Final-packet loss stalls the browser probe when its target is not divisible by twelve | Drive retransmission from a separate callback clock | Tick-599 failure reproduced in Chromium and real-Wasm fixture, then passed |
+| A long packet blackout exhausts browser input history and aborts instead of resuming | Bound capture lead to 120 ticks and retain the pending tick on capacity | Real-Wasm blackout/recovery regression and actual Chromium injected loss |
 
 Final inspection found no further actionable defects in the reviewed change. Remaining architectural features are recorded in BACKLOG.md; this is not a general security or internet-reliability certification.
 
@@ -31,6 +33,8 @@ All commands below ran on General x86, with both gameplay peers on that machine:
 - Godot 4.7 Compatibility capture: GTX 960/NVIDIA 550.163.01, clean script execution; gameplay.png was opened and inspected.
 - Changed Markdown links, whitespace and shell/Python syntax were checked at closeout.
 
+The follow-up pass reviewed packet ordering, ring reuse, recovery barriers, interpolation/lifecycle, the typed boundary and browser scheduling. It repeated the full deterministic suite including two new real-Wasm browser-fixture regressions; all passed. Worker, lobby and diagnostics tests passed together: 27 tests. Actual headless Chromium WebRTC passed with a 5.5-second injected send blackout (197 packets discarded per direction) and one discarded final-input packet per direction at tick 599. Confirmed state/events matched the native oracle; fresh transport reached 840 and solo/reload reached 1080 without desync or dropped events. A 3 MiB CDP return value also passed. No further actionable findings remain in those reviewed paths.
+
 The protected relay and cross-network harnesses were not run. The cloned game uses its committed fallback art; private CraftPix sources were not transferred. New presentation fixtures use synthetic frame textures, so animation-clock correctness is distinct from final art acceptance.
 
 ## Runtime and retained failures
@@ -46,5 +50,7 @@ The successful Chromium wrapper uses ANGLE GLES, NVIDIA vendor selection, ignore
 Ignored evidence: .local/network-review-20261106/{core,deterministic,service,cdp,browser-handler,interpolation,presentation,enet-host,enet-client,gpu-capture,browser-direct,browser-gpu}.log; browser-final.json, browser-headless.json, enet-pair.json, transfer.json and gameplay.png. Rejected attempts remain alongside them. Build reports: build/core-build.json and build/deterministic/. Test tool pins/wrappers: .local/test-tools/.
 
 Source /workspace/agent-kit/env.sh and prepend the project's .local/test-tools/bin to PATH. Use /usr/local/bin/godot --headless for the two snapshot scripts. Run python3 tests/deterministic_browser.py --headless --local-only for protocol-only checking. For the retained NVIDIA check, use the existing GPU lock/compositor and NVIDIA EGL/GLX vendor environment; the project-local Chromium wrapper records its complete flags.
+
+Follow-up evidence: .local/network-rereview-20261106/{tail-before,probe-before,probe-after,deterministic,services,browser-impairment}.log, browser-impairment.json and the retained injected-loss script browser-impairment.py. The original tick-599 timeout and history-capacity failure are retained, distinct from successful reruns. An initial relocated Python import error and incomplete SDP mock were setup errors, corrected before the behavior regressions; the mock error log is retained separately. The follow-up reused installed runtimes, imports and local test dependencies; no GPU repeat was needed for network-only changes. Godot rendering/ENet and NVIDIA evidence above belong to the preceding pass.
 
 Same-machine success does not establish NAT traversal, independent-network behavior, phone controls, human latency acceptance, full Godot Web/private-room acceptance or automatic production recovery.

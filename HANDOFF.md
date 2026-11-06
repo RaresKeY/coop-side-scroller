@@ -4,24 +4,24 @@ Updated 2026-11-06. Environment: general-x86 (Dev Workbench), /workspace/coop-si
 
 ## Objective and decisions
 
-Continue the co-op project here, research conventional networking differences and review/patch until clean. Test both peers on this machine; no Runpod. Preserve the original workstation checkout and all transferred uncommitted work. Keep the host snapshot game and deterministic experiment distinct. No publication or PR.
+Review and patch the co-op networking work until no actionable findings remain. Work in this normal checkout; test both peers on this machine, never Runpod. Preserve the original workstation checkout and transferred work. No push, PR or publication. Keep the shipping host/snapshot game separate from the deterministic experiment.
 
 ## State
 
-Imported baseline ae4a046 plus the existing deterministic experiment is preserved in bc3e979 on work/network-review-20261106. Implemented bounded remote-actor position interpolation, preserving local guest latency, authoritative state and 60 Hz animation clocks. Patched CDP deadline handling and added explicit local-only/headless browser probe modes without relaxing the default NVIDIA gate. Research and current contracts/backlog are synchronized.
-
-Review found and repaired local-actor delay, render-driven animation timing and premature CDP timeouts. The final changed paths have no remaining actionable self-review findings. This is not an independent human review.
+Branch work/network-review-20261106 contains upstream ae4a046, preserved transferred work bc3e979 and interpolation/test hardening 475e51e. The follow-up review found two browser-probe recovery defects: retries stopped at targets not divisible by twelve, and prolonged packet loss exhausted captured-input history. Both are repaired. Retry timing uses an independent callback clock; capture pauses within a 120-tick lead and never skips a pending input. Two regressions exercise the actual browser fixture and real Wasm. Current specs and review evidence are synchronized. No further actionable self-review findings remain in the reviewed paths; no independent human review is claimed.
 
 ## Verification and limits
 
-Native sanitizer/core/Wasm, 18,000-tick deterministic cross-compiler parity and simulated impairment/recovery, 19 service tests, four CTests, 13 interpolation checks, seven real-main presentation checks, CDP/HTTP regressions, actual local ENet and actual local Chromium WebRTC passed. Godot and browser WebGL verified NVIDIA GTX 960. Browser recovery/reload reached tick 1080; the gameplay capture was opened.
+The follow-up full deterministic suite passed native sanitizers/contracts, twelve impairment cases, checkpoint recovery and 18,000-tick GCC/Clang/Wasm state/checkpoint/event parity, plus the new loss regressions and existing Python checks. Worker/lobby/diagnostics: 27 passed.
 
-Initial tool/ICE/GPU failures are retained in evidence, with successful fixes distinguished. The GPU browser uses the project-local NVIDIA GLES wrapper with software desktop composition; the WebGL renderer remains hardware. Private art was not copied; the clone uses fallback art. No live TURN, independent-network, mobile, human-feel or full Godot Web room-flow acceptance is claimed.
+Actual same-machine headless Chromium WebRTC passed a 5.5-second injected packet blackout and one lost final packet per direction at tick 599, matching native state/events. Fresh transport reached 840; creator departure and page reload reached 1080 with no desync/event drops. The preceding pass verified Godot ENet, interpolation/pose clocks and NVIDIA Godot/WebGL; those unchanged paths were not rerun in this network-only follow-up.
+
+No live TURN, independent-network, mobile, human-feel or full Godot Web/private-room acceptance is claimed. Private art was not copied; the clone uses fallback art. No new dependencies were downloaded.
 
 ## Next action
 
-Continue from this General x86 checkout. Local prediction/reconciliation and automatic reconnect/checkpoint negotiation remain explicit future work. Do not repeat setup or move tests to Runpod. Approved native test tools are retained under .local/test-tools, with package hashes and wrappers; no JavaScript packages or system installations were added.
+Continue in this General x86 checkout. Prediction/reconciliation and automatic reconnect/checkpoint negotiation remain future work. Reuse approved project-local test tools under .local/test-tools and the prepared agent-kit runtime. No setup repetition or Runpod tests are needed.
 
 ## Evidence
 
-[Review/results](reviews/networking-2026-11-06.md), [presentation contract](specs/snapshot-presentation.md), [research comparison](research/networking-models/report.md), [source ledger](research/networking-models/sources.md). Central research snapshot: /workspace/research/studies/game-networking-models-2026-11-06/. Ignored runtime receipts/logs/capture: .local/network-review-20261106/; compiled receipts/traces: build/. One preexisting completed workbench job was archived to /workspace/.coop-bootstrap-preserved-job-cc71d04c17c44dc8.json to free a job slot; other job history was preserved.
+[Review/results](reviews/networking-2026-11-06.md), [experiment contract](specs/deterministic-coop.md), [presentation contract](specs/snapshot-presentation.md), [research](research/networking-models/report.md). Follow-up receipts/reproductions: .local/network-rereview-20261106/. Prior evidence/capture: .local/network-review-20261106/. Build traces: build/deterministic/. Test dependency pins: .local/test-tools/packages.json.
