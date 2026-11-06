@@ -100,7 +100,7 @@ func request_data(data: Dictionary, request_generation: int) -> Dictionary:
   game.diagnostics.record("http",{"action":str(data.get("action","unknown")),"status":int(response[1]),"code":safe_code(value.get("error","ok"))})
  if response[1] != 200:
   if game.diagnostics != null: game.diagnostics.flush()
-  return {"error":service_error(response[1],value.get("error","unknown_error"))}
+  return {"error":service_error(response[1],value.get("error","unknown_error")),"status":int(response[1]),"code":safe_code(value.get("error","unknown_error"))}
  if value.get("version") != 1: return {"error":"Incompatible room service"}
  return value
 
@@ -148,8 +148,12 @@ func refresh():
  busy = false
  next_poll = Time.get_ticks_msec()+5000
  if result.has("error"):
-  hint.text = result.error
-  next_poll = 1 << 60 # Explicit Refresh retries authentication/service failures.
+  hint.text = result.error + " · refreshing…" if int(result.get("status",0)) not in [401,403,429] else result.error
+  # Failed refreshes invalidate the buttons too. Never offer rooms from a
+  # previous successful response after their freshness can no longer be checked.
+  listed_rooms = ""
+  clear_rows()
+  if int(result.get("status",0)) in [401,403,429]: next_poll = 1 << 60
   return
  var rooms = result.get("rooms",[])
  if not rooms is Array: return
@@ -194,6 +198,10 @@ func enter_room(action: String, id: String = ""):
  create_button.disabled = false
  if result.has("error"):
   hint.text = result.error
+  if result.get("code","") == "room_expired":
+   listed_rooms = ""
+   clear_rows()
+   next_poll = 0
   return
  if not result.get("id") is String or result.get("role") not in ["host","client"]:
   hint.text = "Invalid room response"
@@ -213,10 +221,8 @@ func enter_room(action: String, id: String = ""):
  hint.text = "Room %s · waiting for partner… · diagnostic %s" % [room_id,game.diagnostics.id]
  game.pairing_role = role
  game.status.text = "Preparing private room…"
- busy = true
- if role == "host": await game.rtc_offer()
- if attempt != generation: return
- busy = false
+ # Reserve/discover first. Allocate TURN and gather an offer only when the
+ # partner joins, so a long wait never leaves stale relay credentials in a room.
  next_poll = 0
 
 func offer_compatibility_retry(message: String, source: String) -> bool:
@@ -233,7 +239,7 @@ func offer_compatibility_retry(message: String, source: String) -> bool:
  game.setup_menu.hide()
  game.signal_panel.hide()
  panel.show()
- hint.text = message + "\nRetry switches both players to Compatibility (TLS 443)."
+ hint.text = message.replace("check network and exchange fresh codes","retry this room").replace("check answer exchange and relay access","retry this room") + "\nRetry switches both players to Compatibility (TLS 443)."
  retry_button.show()
  retry_button.disabled = false
  return true
@@ -292,6 +298,11 @@ func sync_room():
    active = false
    panel.hide()
    return
+  if result.get("code","") == "room_expired":
+   game.rtc_fail("Room expired or closed · choose a fresh room","lobby_errors")
+   open()
+   hint.text = "Previous room expired or closed · choose another or create one"
+   return
   failures += 1
   hint.text = result.error + " · diagnostic " + game.diagnostics.id + " · retrying…"
   if failures >= 3: game.rtc_fail("Room setup failed: " + str(result.error) + " · open Private rooms and retry","lobby_errors")
@@ -314,8 +325,15 @@ func sync_room():
    active = false
   return
  var route_hint = "Compatibility (TLS 443)" if epoch == 1 else "connecting automatically…"
- hint.text = "Room %s · %s" % [room_id,route_hint if result.get("players",1)==2 else "waiting for partner…"]
+ hint.text = "Room %s · %s" % [room_id,route_hint if result.get("players",1)==2 else "waiting for partner · up to one hour"]
  game.status.text = "Private room · Compatibility (TLS 443)" if epoch == 1 else "Private room · automatic connection setup"
+ if role == "host" and result.get("players",1) == 2 and game.rtc == null:
+  busy = true
+  await game.rtc_offer()
+  if attempt != generation: return
+  busy = false
+  next_poll = 0
+  return
  var incoming = result.get("signal","")
  if not accepted and incoming is String and not incoming.is_empty():
   if game.ConnectionCodes.decode(incoming).is_empty():

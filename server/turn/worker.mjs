@@ -141,14 +141,14 @@ export default {fetch:(request,env)=>handle(request,env)};
 // One SQLite Durable Object serializes the small private room directory.
 // Rooms temporarily persist SDP/ICE, which can include peer addresses.
 // No gameplay or account credentials are stored here.
-const ROOM_IDLE_MS=90000, ROOM_LIFETIME_MS=600000, ROOM_LIMIT=32;
+const ROOM_IDLE_MS=300000, ROOM_LIFETIME_MS=3600000, ROOM_LIMIT=32;
 const SEAT=/^[a-f0-9]{32}$/;
 const CODE=/^[A-F0-9]{8}$/;
 function signalEnvelope(code,role) {
  if(typeof code!=='string'||code.length>65536)return null;
  try {
   const data=JSON.parse(atob(code));
-  if(data.game!=='ember-coop'||data.version!==1||![1,2].includes(data.protocol)||!SEAT.test(data.session)||data.type!==(role==='host'?'offer':'answer'))return null;
+  if(data.game!=='ember-coop'||data.version!==1||![1,2,3].includes(data.protocol)||!SEAT.test(data.session)||data.type!==(role==='host'?'offer':'answer'))return null;
   if(typeof data.sdp!=='string'||!data.sdp.startsWith('v=0')||data.sdp.length>32768||!Array.isArray(data.ice)||!data.ice.length||data.ice.length>64)return null;
   if(data.ice.some(c=>!Array.isArray(c)||c.length!==3||typeof c[0]!=='string'||c[0].length>256||!Number.isInteger(c[1])||c[1]<0||c[1]>65535||typeof c[2]!=='string'||!c[2].startsWith('candidate:')||c[2].length>4096))return null;
   return data;

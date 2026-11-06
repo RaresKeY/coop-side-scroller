@@ -5,7 +5,7 @@ const { module, instance } = await WebAssembly.instantiate(bytes, {});
 const check = (condition, message) => { if (!condition) throw new Error(message); };
 check(WebAssembly.Module.imports(module).length === 0, 'Wasm must have no imports');
 const api = instance.exports;
-check(api.ec_v1_abi_version() === 0x10000 && api.ec_v1_protocol_version() === 2, 'version mismatch');
+check(api.ec_v1_abi_version() === 0x10000 && api.ec_v1_protocol_version() === 3, 'version mismatch');
 check(api.ec_v1_create(0,1,1) === 0, 'incompatible ABI accepted');
 const host = api.ec_v1_create(0x10000,1,1), guest = api.ec_v1_create(0x10000,2,2);
 check(host && guest, 'handle allocation');
@@ -78,6 +78,32 @@ for (let i=0;i<60;i++) {
  transfer(guest,host,2);cmd(host,2);transfer(host,guest,1);
  check(cmd(guest,10,3,2)===cmd(host,10,3,2),'Wasm reconciliation position');
  check(cmd(guest,10,4,2)===cmd(host,10,4,2),'Wasm reconciliation jump memory');
+}
+// Reproduce batched arrival and short loss bursts in the real Wasm instance.
+for(const batch of [1,3,6,9])for(const loss of [false,true]){
+ cmd(host,0,1,1);cmd(host,3,2,1);cmd(guest,0,2,2);
+ let wire=[];
+ const emit=(source,sender,tick)=>{
+  let n;
+  while((n=cmd(source,7))>0){
+   const data=Array.from({length:n},(_,i)=>cmd(source,8,i));cmd(source,9);
+   if(!loss||tick%37<12||tick%37>13)wire.push({due:Math.ceil((tick+5)/batch)*batch,sender,data});
+  }
+  while(cmd(source,12)>0)cmd(source,13);
+ };
+ for(let tick=0;tick<360;tick++){
+  const due=wire.filter(p=>p.due<=tick);wire=wire.filter(p=>p.due>tick);
+  for(const p of due){
+   const before=[cmd(guest,10,3,2),cmd(guest,10,4,2),cmd(guest,10,9,2)];
+   const target=p.sender===1?guest:host;
+   check(cmd(target,4,p.sender,p.data.length)===0,'batched stage');
+   for(let i=0;i<p.data.length;i++)cmd(target,5,i,p.data[i]);
+   check(cmd(target,6)===0,'batched receive');
+   if(p.sender===1&&tick>30)check(before.every((value,i)=>value===cmd(guest,10,[3,4,9][i],2)),'batched/lost snapshot corrected local trajectory');
+  }
+  cmd(guest,1,tick>=30&&tick<120?1000:tick>=160&&tick<220?-1000:0,(tick%53>=13&&tick%53<30?1:0)|(tick%101>=20&&tick%101<70?2:0));
+  cmd(guest,2);emit(guest,2,tick);cmd(host,2);emit(host,1,tick);
+ }
 }
 api.ec_v1_destroy(guest);api.ec_v1_destroy(host);
 console.log('Wasm ABI + native parity PASS', result);

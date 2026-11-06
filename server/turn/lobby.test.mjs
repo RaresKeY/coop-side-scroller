@@ -129,7 +129,7 @@ Deno.test('Journal writes and other rooms cannot postpone the earliest seat leas
  const original=Date.now;let now=original();Date.now=()=>now;
  try {
   const f=fixture();const room=(await f.call({action:'create',seat:host,name:'First'}))[1];
-  const deadline=f.store.get('room:'+room.id).hostSeen+90000;
+  const deadline=f.store.get('room:'+room.id).hostSeen+300000;
   now+=45000;
   await f.call({action:'create',seat:third,name:'Second'});
   check(f.alarm()===deadline,'creation postponed the first lease');
@@ -154,7 +154,7 @@ Deno.test('Continuous public diagnostic uploads do not retain an abandoned room'
    if(f.alarm()!==null&&f.alarm()<=now){await f.object.alarm();alarms++;}
    const response=await handle(new Request('https://issuer.example/v1/diagnostics',{method:'POST',headers:{Origin:'https://rareskey.github.io',Authorization:'Bearer test-private'},body:JSON.stringify({version:1,build:'diagnostics-v2',attempt:'a'.repeat(16),events:[{event:'begin',role:'client',ms:0}]})}),f.env);
    check(response.status===200,'diagnostic upload rejected');
-   if(now-start>=90000)check(!f.store.has('room:'+room.id),'uploads retained an expired room');
+   if(now-start>=300000)check(!f.store.has('room:'+room.id),'uploads retained an expired room');
   }
   check(alarms===1,'room expiry postponed or journal unnecessarily wakes every lease');
  } finally {Date.now=original;}
@@ -211,12 +211,31 @@ Deno.test('Mixed client versions cannot strand a room in an unsupported TLS retr
  check((await legacy.call({action:'sync',id:oldRoom.id,seat:host,retryCapable:'yes'}))[0]===400);
 });
 
-Deno.test('Prediction protocol 2 signaling works and mixed gameplay protocols reject',async()=>{
- const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Prediction'}))[1];
- await f.call({action:'join',id:room.id,seat:guest});
- const v2=type=>btoa(JSON.stringify({...JSON.parse(atob(signal(type))),protocol:2}));
- const sync=(seat,code)=>f.call({action:'sync',id:room.id,seat,signal:code});
- check((await sync(host,v2('offer')))[0]===200);
- check((await sync(guest,signal('answer')))[0]===409,'mixed protocol accepted');
- check((await sync(guest,v2('answer')))[0]===200);
+Deno.test('Prediction protocols 2/3 work in separate matching pairs',async()=>{
+ for(const protocol of [2,3]){
+  const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Prediction'}))[1];
+  await f.call({action:'join',id:room.id,seat:guest});
+  const code=(type,version=protocol)=>btoa(JSON.stringify({...JSON.parse(atob(signal(type))),protocol:version}));
+  const sync=(seat,value)=>f.call({action:'sync',id:room.id,seat,signal:value});
+  check((await sync(host,code('offer')))[0]===200);
+  check((await sync(guest,code('answer',protocol===3?2:3)))[0]===409,'mixed protocol accepted');
+  check((await sync(guest,code('answer')))[0]===200);
+ }
+});
+
+Deno.test('Actively renewed rooms allow a late join for one hour, then expire',async()=>{
+ const original=Date.now;let now=original();Date.now=()=>now;
+ try {
+  const f=fixture(),start=now;
+  f.env.INVITE_EXPIRES_AT=String(Math.floor(now/1000)+7200);
+  const room=(await f.call({action:'create',seat:host,name:'Late partner'}))[1];
+  for(let minute=1;minute<60;minute++){
+   now=start+minute*60000;
+   check((await f.call({action:'sync',id:room.id,seat:host}))[0]===200,'Live host expired before one hour');
+  }
+  check((await f.call({action:'list'}))[1].rooms.some(r=>r.id===room.id));
+  check((await f.call({action:'join',id:room.id,seat:guest}))[0]===200,'Late join rejected');
+  now=start+3600000;
+  check((await f.call({action:'sync',id:room.id,seat:host}))[1].error==='room_expired');
+ } finally {Date.now=original;}
 });

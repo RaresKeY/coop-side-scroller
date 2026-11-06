@@ -21,6 +21,10 @@ class FakeLobby extends "res://src/private_lobby.gd":
   await complete_request
   return response
 
+class FakeGame extends "res://src/main.gd":
+ var offers := 0
+ func rtc_offer(): offers += 1
+
 var failed := false
 func check(value: bool, message: String):
  if not value:
@@ -28,13 +32,13 @@ func check(value: bool, message: String):
   push_error(message)
 
 func _initialize():
- var data = {"game":"ember-coop","version":1,"protocol":2,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\ns=test\r\n","ice":[["0",0,"candidate:1 1 UDP 1 192.0.2.1 5000 typ host"]]}
+ var data = {"game":"ember-coop","version":1,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\ns=test\r\n","ice":[["0",0,"candidate:1 1 UDP 1 192.0.2.1 5000 typ host"]]}
  check(not Codes.decode(Codes.encode(data)).is_empty(),"Offer round trip")
  data.type = "answer"
  check(not Codes.decode(Codes.encode(data)).is_empty(),"Answer round trip")
  for text in ["", "!not-base64!", "A".repeat(65540),Marshalls.utf8_to_base64("[]")]:
   check(Codes.decode(text).is_empty(),"Invalid code accepted")
- for patch in [{"version":2},{"protocol":1},{"game":"other"},{"session":"old"},{"sdp":23},{"sdp":"x"},{"ice":[]},{"ice":[["0",0.5,"candidate:x"]]},{"ice":[["0",-1,"candidate:x"]]},{"ice":[["0",0,"invalid"]]},{"ice":[[[],0,"candidate:x"]]}]:
+ for patch in [{"version":2},{"protocol":1},{"protocol":2},{"game":"other"},{"session":"old"},{"sdp":23},{"sdp":"x"},{"ice":[]},{"ice":[["0",0.5,"candidate:x"]]},{"ice":[["0",-1,"candidate:x"]]},{"ice":[["0",0,"invalid"]]},{"ice":[[[],0,"candidate:x"]]}]:
   var invalid = data.duplicate(true)
   invalid.merge(patch,true)
   check(Codes.decode(Codes.encode(invalid)).is_empty(),"Invalid envelope accepted: " + str(patch))
@@ -54,7 +58,7 @@ func _initialize():
  call_deferred("scene_checks")
 
 func scene_checks():
- var scene = load("res://main.tscn").instantiate()
+ var scene = FakeGame.new()
  root.add_child(scene)
  # A closed connection can still deliver queued browser callbacks.
  var previous = FakeRTC.new()
@@ -88,7 +92,7 @@ func scene_checks():
  scene.solo()
  check(scene.signal_out.text.is_empty() and scene.signal_in.text.is_empty(),"Old codes survived reset")
  scene.show_pairing("host")
- var invitation = {"game":"ember-coop","version":1,"protocol":2,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]}
+ var invitation = {"game":"ember-coop","version":1,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]}
  scene.signal_in.text = Codes.encode(invitation)
  scene.rtc_accept()
  check(scene.rtc == null and scene.status.text.begins_with("That is an invitation"),"Host accepted its own invitation")
@@ -101,7 +105,7 @@ func scene_checks():
  scene.signal_in.text = "invalid"
  scene.rtc_accept()
  check(scene.rtc == null and scene.status.text.begins_with("Invalid/incompatible"),"Invalid code changed session")
- scene.signal_in.text = Codes.encode({"game":"ember-coop","version":1,"protocol":2,"session":"0123456789abcdef0123456789abcdef","type":"answer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]})
+ scene.signal_in.text = Codes.encode({"game":"ember-coop","version":1,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"answer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]})
  scene.rtc_accept()
  check(scene.rtc == null and scene.status.text.begins_with("Answer does not match"),"Answer without offer accepted")
  # Mismatched session cannot replace a pending host offer.
@@ -181,6 +185,37 @@ func scene_checks():
  check(scene.setup_menu.visible and not fake_lobby.panel.visible,"Menu did not hide lobby")
  scene.toggle_menu()
  check(fake_lobby.panel.visible and not scene.setup_menu.visible,"Menu did not restore lobby")
+ # A failed directory refresh cannot leave stale Join buttons active.
+ fake_lobby.clear_rows()
+ var old_join = Button.new()
+ old_join.text = "Stale room"
+ fake_lobby.rows.add_child(old_join)
+ fake_lobby.listed_rooms = "old directory"
+ fake_lobby.response = {"error":"Network unavailable"}
+ fake_lobby.refresh()
+ fake_lobby.complete_request.emit()
+ check(fake_lobby.rows.get_child_count()==0 and fake_lobby.listed_rooms=="","Failed refresh retained stale room buttons")
+ check(fake_lobby.next_poll < Time.get_ticks_msec()+6000,"Transient directory failure stopped polling")
+ # Discovering a room must not allocate a relay before a partner joins.
+ fake_lobby.response = {"version":1,"id":"ABCDEF12","role":"host","retrySupported":true}
+ fake_lobby.enter_room("create")
+ fake_lobby.complete_request.emit()
+ check(scene.offers==0 and scene.rtc==null,"Waiting host allocated stale relay credentials")
+ fake_lobby.response = {"version":1,"players":1,"signal":""}
+ fake_lobby.sync_room();fake_lobby.complete_request.emit()
+ check(scene.offers==0,"Lone host started connection setup")
+ fake_lobby.response = {"version":1,"players":2,"signal":""}
+ fake_lobby.sync_room();fake_lobby.complete_request.emit()
+ check(scene.offers==1,"Joined partner did not trigger fresh host offer")
+ scene.relay_access.text = "a".repeat(32) # Valid-shaped fixture invitation, no service call.
+ # Definitive expiry immediately restores the directory, without a stale retry.
+ fake_lobby.response = {"error":"Closed","status":404,"code":"room_expired"}
+ fake_lobby.sync_room();fake_lobby.complete_request.emit()
+ check(fake_lobby.active and fake_lobby.room_id.is_empty() and fake_lobby.panel.visible and not fake_lobby.retry_button.visible,"Expired setup retained a dead room/retry instead of directory")
+ fake_lobby.response = {"version":1,"rooms":[]}
+ fake_lobby.complete_request.emit() # pending best-effort leave / directory refresh
+ fake_lobby.complete_request.emit()
+ fake_lobby.room_id = "ABCDEF12" # Re-establish the following connected-cleanup fixture.
  # A connected session survives the peer completing directory cleanup first.
  var live_peer = FakeRTC.new()
  live_peer.state = WebRTCPeerConnection.STATE_CONNECTED

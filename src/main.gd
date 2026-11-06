@@ -309,7 +309,7 @@ func network_ended(message: String, source := "multiplayer_disconnect"):
   diagnostics.record("failure",detail)
   diagnostics.flush()
  if OS.has_feature("web") and lobby != null and lobby.offer_compatibility_retry(message,source):
-  status.text = message
+  status.text = "Private room · connection attempt failed"
   return
  solo()
  status.text = message + (" · diagnostic " + diagnostics.id if diagnostics != null and not diagnostics.id.is_empty() else "")
@@ -325,7 +325,7 @@ func rtc_fail(message: String, source := "setup"):
   diagnostics.flush()
   message += " · diagnostic " + diagnostics.id
  if OS.has_feature("web") and lobby != null and lobby.offer_compatibility_retry(message,source):
-  status.text = message
+  status.text = "Private room · connection attempt failed"
   return
  var in_lobby = lobby != null and not lobby.room_id.is_empty()
  var role = "" if in_lobby else pairing_role

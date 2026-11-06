@@ -6,7 +6,7 @@ This is a runnable alternative to the shipping host/snapshot model, not a replac
 
 ## Core contract
 
-The additive `ec_v1_deterministic_*` C ABI shares `EC_ABI_V1`, `EC_Player`, `EC_View` and `EC_Event`; it does not reinterpret the shipping `EC02` protocol or host/replica calls. Four opaque handles are available. Each has a caller-supplied nonzero 128-bit session ID, epoch, authenticated local slot 1/2, and prediction limit 0–12 ticks. Calls are externally serialized. Destroyed pointers must not be reused, including after a storage slot is recycled.
+The additive `ec_v1_deterministic_*` C ABI shares `EC_ABI_V1`, `EC_Player`, `EC_View` and `EC_Event`; it does not reinterpret the shipping `EC03` protocol or host/replica calls. Four opaque handles are available. Each has a caller-supplied nonzero 128-bit session ID, epoch, authenticated local slot 1/2, and prediction limit 0–12 ticks. Calls are externally serialized. Destroyed pointers must not be reused, including after a storage slot is recycled.
 
 The adapter captures contiguous local inputs for numbered ticks and supplies authenticated remote packets. Tick numbers are bounded to `0x7ffffe00`; start a new session before exhausting the range. A 256-frame ring retains actual inputs and state hashes. Unacknowledged local inputs cannot be overwritten. If capture/history capacity is exhausted, pause input capture or negotiate recovery; never skip missing inputs silently. The laboratory limits capture lead and catch-up work explicitly.
 

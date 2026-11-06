@@ -1,8 +1,8 @@
 # C ABI and message contract, version 1.0
 
-Source of truth: `core/include/ember_core.h`. Symbol prefix is `ec_v1_`; ABI value is `0x00010000`, protocol version is independently 2. `create` requires the exact ABI version. Future incompatible layouts/protocols require a new version, not reinterpretation of existing messages.
+Source of truth: `core/include/ember_core.h`. Symbol prefix is `ec_v1_`; ABI value is `0x00010000`, protocol version is independently 3. `create` requires the exact ABI version. Future incompatible layouts/protocols require a new version, not reinterpretation of existing messages.
 
-`core/include/ember_deterministic.h` adds separate opaque handles and `ec_v1_deterministic_*` functions using the same ABI value and copied view/event layouts. Its `EDI1` input packets and `EDC1` checkpoints never enter `ec_v1_receive`; see [the experimental contract](deterministic-coop.md). Role values and numeric operations remain compatible. Shipping messages now use `EC02`; old `EC01` gameplay is rejected. Both peers must reload. The deterministic experiment retains its separate `EDI1`/`EDC1` formats.
+`core/include/ember_deterministic.h` adds separate opaque handles and `ec_v1_deterministic_*` functions using the same ABI value and copied view/event layouts. Its `EDI1` input packets and `EDC1` checkpoints never enter `ec_v1_receive`; see [the experimental contract](deterministic-coop.md). Role values and numeric operations remain compatible. Shipping messages now use `EC03`; old `EC01`/`EC02` gameplay is rejected. Both peers must reload. The deterministic experiment retains its separate `EDI1`/`EDC1` formats.
 
 ## Calls and ownership
 
@@ -27,9 +27,9 @@ Status values: EC_OK=0, EC_EMPTY=1, invalid handle=-1, invalid argument=-2, auth
 
 ## Wire serialization
 
-Every multibyte field is exactly 32 bits, **little-endian**; signed fields use two's-complement encoding. There is no native packing, padding, floating-point field or object serialization. Header bytes 0..3 are ASCII `EC02` (wire version 2), type at offset 4 and uint32 message sequence at offset 8. No checksum/MAC is supplied; transport security belongs outside this library.
+Every multibyte field is exactly 32 bits, **little-endian**; signed fields use two's-complement encoding. There is no native packing, padding, floating-point field or object serialization. Header bytes 0..3 are ASCII `EC03` (wire version 3), type at offset 4 and uint32 message sequence at offset 8. No checksum/MAC is supplied; transport security belongs outside this library.
 
-Input type 1, exactly **32 bytes**:
+Input type 1, **36 + 8 × count bytes** (44–100 bytes):
 
 | Offset | Field |
 | --- | --- |
@@ -38,6 +38,10 @@ Input type 1, exactly **32 bytes**:
 | 16 | int32 axis milli-input |
 | 20 | uint32 held flags |
 | 24 / 28 | uint32 cumulative jump / attack press counters |
+| 32 | uint32 recent frame count, 1–8 |
+| 36 + 8 × i | int32 axis and uint32 held flags, oldest frame first |
+
+The final record must equal the current axis/flags in the header. Record sequences are `header_sequence - (count - 1 - i)` modulo uint32. Entire packets validate before queue mutation; duplicate overlaps are skipped. A full host queue rejects atomically without advancing its receive sequence. Only executed frames enter the snapshot ACK; the host never repeats input time while waiting for more packets. Guest simulation pauses when no command is queued.
 
 Snapshot type 2, exactly **112 bytes**:
 

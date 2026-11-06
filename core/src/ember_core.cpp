@@ -6,7 +6,7 @@ static_assert(sizeof(EC_View) == 116, "C ABI view layout");
 static_assert(sizeof(EC_Event) == 16, "C ABI event layout");
 
 namespace {
-constexpr uint32_t MESSAGE_CAP = 64, EVENT_CAP = 64, SNAPSHOT_SIZE = 112, PREDICTION_CAP = 128;
+constexpr uint32_t MESSAGE_CAP = 64, EVENT_CAP = 64, SNAPSHOT_SIZE = 112, PREDICTION_CAP = 128, INPUT_REDUNDANCY = 8;
 struct PredictedInput { uint32_t sequence; ember_sim::Input input; };
 struct Message {
   uint32_t size;
@@ -27,7 +27,10 @@ struct EC_Handle {
   bool jump_pending, attack_pending;
   uint32_t applied_sequence, predicted_jump, prediction_head, prediction_count;
   EC_Player predicted_player;
+  // Host: pending command frames. Replica: unacknowledged prediction frames.
   PredictedInput prediction[PREDICTION_CAP];
+  ember_sim::Input sent_inputs[INPUT_REDUNDANCY];
+  uint32_t sent_input_count, sent_input_head;
   EC_Player players[2];
   Input inputs[2];
   uint32_t held_jump[2];
@@ -83,7 +86,7 @@ Message *message(EC_Handle *h, uint32_t size, uint32_t type, uint32_t seq) {
   m->bytes[0] = 'E';
   m->bytes[1] = 'C';
   m->bytes[2] = '0';
-  m->bytes[3] = '2';
+  m->bytes[3] = '3';
   put(m->bytes + 4, type);
   put(m->bytes + 8, seq);
   return m;
@@ -97,6 +100,7 @@ void spawn(EC_Handle *h, uint32_t index) {
   if (index == 1) {
     h->applied_sequence = h->remote_jump_serial = h->remote_attack_serial = 0;
     h->applied_seen = h->jump_pending = h->attack_pending = false;
+    h->prediction_head = h->prediction_count = 0;
   }
   emit(h, EC_EVENT_JOIN, index + 1, 0);
 }
@@ -228,6 +232,8 @@ int32_t ec_v1_set_peer_active(EC_Handle *h, uint32_t slot, uint32_t active) {
   if (!active && h->players[1].active) {
     h->players[1].active = 0;
     h->inputs[1] = {};
+    h->prediction_head = h->prediction_count = 0;
+    h->jump_pending = h->attack_pending = false;
     emit(h, EC_EVENT_LEAVE, 2, 0);
   }
   return EC_OK;
@@ -249,34 +255,51 @@ int32_t ec_v1_tick(EC_Handle *h) {
         predict_input(h, {in.axis, in.flags});
       }
     }
-    auto *m = message(h, 32, 1, h->input_sequence);
+    if (h->sent_input_count == INPUT_REDUNDANCY) {
+      h->sent_input_head = (h->sent_input_head + 1) % INPUT_REDUNDANCY;
+      --h->sent_input_count;
+    }
+    h->sent_inputs[(h->sent_input_head + h->sent_input_count++) % INPUT_REDUNDANCY] = {in.axis, in.flags};
+    auto *m = message(h, 36 + 8 * h->sent_input_count, 1, h->input_sequence);
     if (m) {
       put(m->bytes + 12, 2);
       put(m->bytes + 16, uint32_t(in.axis));
       put(m->bytes + 20, in.flags);
       put(m->bytes + 24, h->local_jump_serial);
       put(m->bytes + 28, h->local_attack_serial);
+      put(m->bytes + 32, h->sent_input_count);
+      for (uint32_t i = 0; i < h->sent_input_count; ++i) {
+        const auto frame = h->sent_inputs[(h->sent_input_head + i) % INPUT_REDUNDANCY];
+        put(m->bytes + 36 + 8 * i, uint32_t(frame.axis));
+        put(m->bytes + 40 + 8 * i, frame.flags);
+      }
     }
     return EC_OK;
   }
-  if (h->players[1].active && h->inputs[1].seen) {
-    h->applied_sequence = h->inputs[1].sequence;
+  // ACK only executed command frames. Reusing a held command on host ticks
+  // made the old ACK ambiguous and caused the replica to replay time twice.
+  ++h->tick;
+  auto sink = [h](uint32_t type, uint32_t slot, uint32_t value) { emit(h, type, slot, value); };
+  ember_sim::step_actor(*h, 0, {h->inputs[0].axis, h->inputs[0].flags}, sink);
+  const uint32_t count = h->prediction_count < INPUT_REDUNDANCY ? h->prediction_count : INPUT_REDUNDANCY;
+  for (uint32_t i = 0; i < count; ++i) {
+    const auto frame = h->prediction[h->prediction_head];
+    h->prediction_head = (h->prediction_head + 1) % PREDICTION_CAP;
+    --h->prediction_count;
+    auto input = frame.input;
+    // Redundant frames normally preserve taps exactly. Counters provide one
+    // fallback attempt when a press is older than the transmitted window.
+    if (input.flags & EC_INPUT_JUMP) h->jump_pending = false;
+    if (input.flags & EC_INPUT_ATTACK) h->attack_pending = false;
+    if (!h->prediction_count) {
+      if (h->jump_pending) { h->held_jump[1] = 0; input.flags |= EC_INPUT_JUMP; }
+      if (h->attack_pending) input.flags |= EC_INPUT_ATTACK;
+    }
+    ember_sim::step_actor(*h, 1, input, sink);
+    h->applied_sequence = frame.sequence;
     h->applied_seen = true;
   }
-  ember_sim::Input frame_inputs[2];
-  for (uint32_t i = 0; i < 2; ++i) {
-    auto in = h->inputs[i];
-    if (i && h->tick + 1 - in.at > 18) in = {};
-    frame_inputs[i] = {in.axis, in.flags};
-  }
-  // Preserve taps even when press/release packets are coalesced before a host
-  // tick or the press packet is lost. Counters are cumulative and modular.
-  if (h->jump_pending) { h->held_jump[1] = 0; frame_inputs[1].flags |= EC_INPUT_JUMP; }
-  if (h->attack_pending) frame_inputs[1].flags |= EC_INPUT_ATTACK;
-  h->jump_pending = h->attack_pending = false;
-  ember_sim::step(*h, frame_inputs, [h](uint32_t type, uint32_t slot, uint32_t value) {
-    emit(h, type, slot, value);
-  });
+  if (count && !h->prediction_count) h->jump_pending = h->attack_pending = false;
   if (h->tick % 3 == 0)
     write_snapshot(h);
   return EC_OK;
@@ -286,13 +309,13 @@ int32_t ec_v1_receive(EC_Handle *h, uint32_t sender, const uint8_t *b,
   if (!valid(h))
     return EC_ERR_HANDLE;
   if (!b || size < 12 || size > EC_MAX_MESSAGE || b[0] != 'E' || b[1] != 'C' ||
-      b[2] != '0' || b[3] != '2')
+      b[2] != '0' || b[3] != '3')
     return reject(h, EC_ERR_MESSAGE);
   uint32_t type = get(b + 4), seq = get(b + 8);
   if (type == 1) {
     if (h->role != EC_ROLE_HOST || sender != 2)
       return reject(h, EC_ERR_AUTHORITY);
-    if (size != 32 || get(b + 12) != 2 || !h->players[1].active)
+    if (size < 44 || get(b + 12) != 2 || !h->players[1].active)
       return reject(h, EC_ERR_MESSAGE);
     int32_t axis = signed_get(b + 16);
     uint32_t flags = get(b + 20);
@@ -301,6 +324,25 @@ int32_t ec_v1_receive(EC_Handle *h, uint32_t sender, const uint8_t *b,
     auto &in = h->inputs[1];
     if (in.seen && !newer(seq, in.sequence))
       return reject(h, EC_ERR_STALE);
+    const uint32_t count = get(b + 32);
+    if (!count || count > INPUT_REDUNDANCY || size != 36 + 8 * count)
+      return reject(h, EC_ERR_MESSAGE);
+    uint32_t fresh = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+      const int32_t frame_axis = signed_get(b + 36 + 8 * i);
+      const uint32_t frame_flags = get(b + 40 + 8 * i);
+      if (frame_axis < -1000 || frame_axis > 1000 || frame_flags > 3 ||
+          (i + 1 == count && (frame_axis != axis || frame_flags != flags)))
+        return reject(h, EC_ERR_MESSAGE);
+      if (!in.seen || newer(seq - (count - 1 - i), in.sequence)) ++fresh;
+    }
+    if (fresh > PREDICTION_CAP - h->prediction_count) return reject(h, EC_ERR_CAPACITY);
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t frame_seq = seq - (count - 1 - i);
+      if (in.seen && !newer(frame_seq, in.sequence)) continue;
+      h->prediction[(h->prediction_head + h->prediction_count++) % PREDICTION_CAP] =
+          {frame_seq, {signed_get(b + 36 + 8 * i), get(b + 40 + 8 * i)}};
+    }
     if ((!in.seen && get(b + 24)) || newer(get(b + 24), h->remote_jump_serial)) {
       h->remote_jump_serial = get(b + 24); h->jump_pending = true;
     }

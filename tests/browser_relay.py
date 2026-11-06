@@ -61,7 +61,7 @@ def run(lobby=False, url=None):
     host.click(160,170)
     enter_code(host,'W'*32)
     host.click(160,201) # Create room.
-    wait_until(lambda:host.evaluate('testPeers.length'),15)
+    wait_until(lambda:host.evaluate('!!globalThis.testRoomId'),15)
     host.capture(ROOT/'build/lobby-waiting.png')
     control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,216)
     wait_until(lambda:guest.evaluate('testHttp.includes(200)'),12)
@@ -77,7 +77,7 @@ def run(lobby=False, url=None):
     assert 0<=index<3,'Test room outside visible rows; do not join another room'
     guest.click(160,285+index*36) # First room's Join button.
     wait_until(lambda:guest.evaluate('testPeers.length'),25)
-    assert all(page.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay' for page in [host,guest])
+    wait_until(lambda:all(page.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay' for page in [host,guest]),30)
     print('LOBBY AUTOMATIC SIGNALING',flush=True)
    else:
     control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(160,387)
