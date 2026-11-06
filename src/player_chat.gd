@@ -318,6 +318,7 @@ func append_message(id: int, slot: int, author: String, text: String):
  bubble.z_index = 20
  bubble.configure(plate(0.68))
  var label = Label.new()
+ label.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
  label.text = text
  label.mouse_filter = Control.MOUSE_FILTER_IGNORE
  label.add_theme_font_size_override("font_size",14)
@@ -345,6 +346,7 @@ func update_positions():
   if slot != local_slot():
    if not tags.has(slot):
     var label = Label.new()
+    label.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
     label.mouse_filter = Control.MOUSE_FILTER_IGNORE
     label.add_theme_font_size_override("font_size",13)
     label.add_theme_color_override("font_shadow_color",Color(0,0,0,0.9))

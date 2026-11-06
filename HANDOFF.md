@@ -1,13 +1,13 @@
-# Local player marker correction
+# Local font rendering correction
 
-Updated 2026-11-06. Objective delivered: restore the original yellow downward triangle above the local character after the user clarified square was a typo. Color, ownership, position/reset and dynamic speech tails are preserved.
+Updated 2026-11-06. Objective: fix broken title/chat text at fractional window and DPI scales. User instruction: do not push yet.
 
-Owner General x86 `/workspace/coop-side-scroller`, branch `work/network-review-20261106`. Preserve dirty workstation checkout. No Runpod/new dependencies; reuse prepared native/Wasm/Godot4.7 tooling and headless software browser.
+Owner: General x86 `/workspace/coop-side-scroller`, branch `work/network-review-20261106`, source base40ec88d. Preserve the preexisting dirty workstation checkout.
 
-State: game/source build9e76f1d2780d4ee0c74dba42af61af9894e51ef3, clean payload660f36dc6eb24e93f6f6b8d1f5ad1ee9573e12cfdd69c319c7473b54679b1fab; Pagesbd94a5afccfeb8a4faef0c26dcb2c5d5e371253b completed with every hosted file hash verified. Source ea44211 was pushed; this final verification-only commit leaves the game payload unchanged. Authentication blocker resolved through the workstation's existing sign-in.
+Decision: dynamic fonts inherit linear filtering from a full-viewport HUD Control; world name/speech labels opt in explicitly. Existing font, sizes, positions, nearest-filtered world art and character shader are preserved. No network/core/Worker change.
 
-Verification:12 native snapshot-presentation checks; local and hosted Chromium startup, real movement input, clean runtime console and inspected triangle captures pass. Secret audit and11 deployment tests pass. Rendering is software; hardware FPS/input-to-display/geographic behavior unmeasured. No new tests added for this shape-only correction.
+State: patched and verified locally. No push or deployment; public game9e76f1d and Pagesbd94a5a remain unchanged. Native player-chat, connection/setup and12 snapshot-presentation checks pass. Actual Web before/after nine-case viewport/DPR sequence, movement, Enter/type/send/one echo and clean runtime console pass. Inspected title/footer/chat/speech captures; a static terrain strip is pixel-identical. Prepared tools/imports and headless software rendering reused on General x86; no Runpod/new dependencies. Hardware/device coverage and input-to-display latency unmeasured.
 
-Evidence General x86 `.local/player-marker-20261106/`; workstation `.agent-handoffs/coop-live-20261106/player-marker/`. Next human acceptance after reload; remove only generated Web candidates/publication staging after hosted proof, preserve core prep/art/evidence.
+Evidence: `.local/text-rendering-20261106/`; workstation `.agent-handoffs/coop-live-20261106/text-rendering/` with `before-after-text.png`, full captures and browser/native logs.
 
-Terra's old room expired and its bounded browser is no longer active; no new room/session was requested or created. Runtime/agent continuation belongs in external milestone/receipt.
+Next action: wait for user review and explicit release of the publication hold. Terra's gameplay browser is separate and still uses the public build; current room/controller state belongs in the external milestone/receipt.

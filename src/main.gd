@@ -107,8 +107,15 @@ func _ready():
  local_marker.hide()
  add_child(local_marker)
  build_animations()
- var canvas = CanvasLayer.new()
- add_child(canvas)
+ var canvas_layer = CanvasLayer.new()
+ add_child(canvas_layer)
+ # Dynamic font atlases need interpolation at fractional viewport/DPI scales;
+ # the world keeps its pixel-art sampling on a separate branch.
+ var canvas = Control.new()
+ canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+ canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+ canvas.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+ canvas_layer.add_child(canvas)
  var panel = VBoxContainer.new()
  panel.position = Vector2(16,12)
  canvas.add_child(panel)
