@@ -101,7 +101,7 @@ func _ready():
  camera.position = Vector2(480,270)
  add_child(camera)
  local_marker = Polygon2D.new()
- local_marker.polygon = PackedVector2Array([Vector2(-3,-6),Vector2(3,-6),Vector2(3,0),Vector2(-3,0)])
+ local_marker.polygon = PackedVector2Array([Vector2(-5,-7),Vector2(5,-7),Vector2.ZERO])
  local_marker.color = Color("f5d76c")
  local_marker.z_index = 10
  local_marker.hide()
