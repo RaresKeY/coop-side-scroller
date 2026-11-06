@@ -25,6 +25,8 @@ Timeouts use adapter monotonic time:
 | Established connection reports disconnected | 10-second recovery grace |
 | Explicit failed/closed | Switch to TLS if eligible; otherwise end the attempt |
 
+Gathering that is already complete with a local description is validated and published before applying its deadline, including when the next adapter frame runs late. Complete gathering with no candidates retains the `no_candidates` failure; a missing local description remains subject to the gathering deadline.
+
 A manual host waiting for the guest reply has no additional answer-wait deadline; ICE itself can still fail. There is no automatic reconnect/ICE restart. Error text distinguishes setup stages but is not a reliable diagnosis of a particular router/NAT. Telemetry omits candidate addresses, SDP and credentials.
 
 ## Signaling envelope

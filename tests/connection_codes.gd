@@ -378,7 +378,7 @@ func scene_checks():
  fake_lobby.complete_request.emit()
  check(scene.selected_connection_route() == 0,"Retry forced TLS for a later room")
  check(scene.connection_route.selected == 0,"Late retry response changed route after leaving")
- check(fake_lobby.epoch == 0 and not fake_lobby.retry_supported and not fake_lobby.retry_requested and not fake_lobby.retry_requested,"Leaving retained retry state")
+ check(fake_lobby.epoch == 0 and not fake_lobby.retry_supported and not fake_lobby.retry_requested and not fake_lobby.setup_failed,"Leaving retained retry state")
  # If an older partner joins while a failed host is waiting to retry, the
  # next poll must close setup with actionable guidance instead of hanging.
  fake_lobby.active = true
@@ -475,6 +475,52 @@ func scene_checks():
    scene.rtc_update(1000+limit+1)
    check(scene.rtc==null and scene.setup_menu.visible,"Setup bound was not enforced: "+phase+str(route))
    fake_lobby.complete_request.emit() # Best-effort leave.
+ # A delayed frame must use already-complete gathering before timing out.
+ # Cover the fast first attempt, TLS retry and advanced manual setup.
+ for route in [0,3,2]:
+  fake_lobby.active = route != 2
+  fake_lobby.room_id = "ABCDEF12" if route != 2 else ""
+  fake_lobby.epoch = 1 if route == 3 else 0
+  fake_lobby.retry_supported = true
+  fake_lobby.transport_established = false
+  fake_lobby.next_poll = 123456
+  scene.rtc_route_mode = route
+  scene.mode = "host"
+  scene.pairing_role = "host"
+  var completed_peer = FakeRTC.new()
+  completed_peer.gathering = WebRTCPeerConnection.GATHERING_STATE_COMPLETE
+  scene.rtc = completed_peer
+  scene.local_signal = {"game":"ember-coop","version":2,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\n","ice":[["0",0,"candidate:1 1 UDP 1 192.0.2.1 5000 typ host"]]}
+  scene.signal_finished = false
+  scene.rtc_started_ms = 1000
+  scene.rtc_connect_ms = 0
+  scene.rtc_update(11001 if route == 0 else 31001)
+  check(scene.rtc == completed_peer and scene.signal_finished and not Codes.decode(scene.signal_out.text).is_empty(),"Completed gathering was discarded after deadline: "+str(route))
+  if route != 2:
+   check(fake_lobby.next_poll == 0,"Completed gathering did not wake private signaling")
+  fake_lobby.complete_request.emit() # Failed baseline may have queued a leave.
+  fake_lobby.room_id = ""
+  scene.solo()
+ # Complete gathering without candidates still reports its actual failure.
+ var empty_peer = FakeRTC.new()
+ empty_peer.gathering = WebRTCPeerConnection.GATHERING_STATE_COMPLETE
+ scene.rtc = empty_peer
+ scene.local_signal = {"sdp":"v=0","ice":[]}
+ scene.signal_finished = false
+ scene.rtc_started_ms = 1000
+ scene.rtc_connect_ms = 0
+ scene.rtc_update(31001)
+ check(scene.rtc == null and scene.status.text.contains("No connection candidates"),"Completed empty gathering was mislabeled as timeout")
+ # A completed browser state without SDP cannot publish a usable invitation.
+ var missing_sdp_peer = FakeRTC.new()
+ missing_sdp_peer.gathering = WebRTCPeerConnection.GATHERING_STATE_COMPLETE
+ scene.rtc = missing_sdp_peer
+ scene.local_signal = {"sdp":"","ice":[["0",0,"candidate:1 1 UDP 1 192.0.2.1 5000 typ host"]]}
+ scene.signal_finished = false
+ scene.rtc_started_ms = 1000
+ scene.rtc_connect_ms = 0
+ scene.rtc_update(31001)
+ check(scene.rtc == null and scene.status.text.contains("gathering timed out"),"Completed browser state without SDP bypassed timeout")
  fake_lobby.clock = -1
  fake_lobby.room_id = "" # Fixture cleanup needs no HTTP leave.
  scene.solo()

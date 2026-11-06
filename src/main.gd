@@ -590,9 +590,7 @@ func rtc_update(now: int):
    rtc_fail("Connection timed out • check answer exchange and relay access","connect_timeout")
    return
   if not signal_finished:
-   if now-rtc_started_ms > (10000 if quick_retry else 30000):
-    rtc_fail("Connection gathering timed out • check browser/network and relay access","gather_timeout")
-    return
+   # Browser gathering may have completed before a delayed frame observes it.
    if rtc.get_gathering_state() == WebRTCPeerConnection.GATHERING_STATE_COMPLETE and local_signal.sdp != "":
     signal_finished = true
     if local_signal.ice.is_empty():
@@ -612,6 +610,10 @@ func rtc_update(now: int):
     pairing_hint.text = "HOST · 1 of 2\nCopy your invitation and send it to your guest. Then enter their reply." if mode == "host" else "JOIN · 2 of 2\nCopy your reply and send it to the host now. They must accept it to connect."
     if state != WebRTCPeerConnection.STATE_CONNECTED:
      status.text = "Connection ready · waiting for partner" if lobby != null and lobby.active else "Connection code ready • send privately to partner"
+
+   elif now-rtc_started_ms > (10000 if quick_retry else 30000):
+    rtc_fail("Connection gathering timed out • check browser/network and relay access","gather_timeout")
+    return
 
 func _process(_dt):
  rtc_update(Time.get_ticks_msec())
