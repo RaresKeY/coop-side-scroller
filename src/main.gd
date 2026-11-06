@@ -331,8 +331,8 @@ func network_ended(message: String, source := "multiplayer_disconnect"):
   detail.reason = "connection"
   diagnostics.record("failure",detail)
   diagnostics.flush()
- if OS.has_feature("web") and lobby != null and lobby.offer_compatibility_retry(message,source):
-  status.text = "Private room · connection attempt failed"
+ if OS.has_feature("web") and lobby != null and lobby.retry_compatibility(source):
+  status.text = "Private room · switching to Compatibility (TLS 443)…"
   return
  solo()
  status.text = message + (" · diagnostic " + diagnostics.id if diagnostics != null and not diagnostics.id.is_empty() else "")
@@ -347,8 +347,8 @@ func rtc_fail(message: String, source := "setup"):
   diagnostics.record("failure",detail)
   diagnostics.flush()
   message += " · diagnostic " + diagnostics.id
- if OS.has_feature("web") and lobby != null and lobby.offer_compatibility_retry(message,source):
-  status.text = "Private room · connection attempt failed"
+ if OS.has_feature("web") and lobby != null and lobby.retry_compatibility(source):
+  status.text = "Private room · switching to Compatibility (TLS 443)…"
   return
  var in_lobby = lobby != null and not lobby.room_id.is_empty()
  var role = "" if in_lobby else pairing_role
@@ -546,6 +546,10 @@ func rtc_accept():
  if pairing_role == "host" and data.type != "answer":
   status.text = "That is an invitation. Enter your guest’s reply instead."
   return
+ # An HTTP answer may arrive after ICE failed but before the next frame poll.
+ if data.type == "answer" and rtc != null and rtc.get_connection_state() in [WebRTCPeerConnection.STATE_FAILED,WebRTCPeerConnection.STATE_CLOSED]:
+  rtc_fail("Connection ended while exchanging signaling","rtc_terminal")
+  return
  if data.type == "offer":
   if not await rtc_begin(false,data.session): return
  elif rtc == null or mode != "host" or local_signal.get("session") != data.session or rtc.get_signaling_state() != WebRTCPeerConnection.SIGNALING_STATE_HAVE_LOCAL_OFFER:
@@ -570,6 +574,8 @@ func rtc_accept():
 func rtc_update(now: int):
  if rtc != null and not local_signal.is_empty():
   var state = rtc.get_connection_state()
+  # Only an eligible private-room first attempt gets the shorter TLS-switch bound.
+  var quick_retry: bool = lobby != null and lobby.can_retry_compatibility()
   if state == WebRTCPeerConnection.STATE_CONNECTED: rtc_connect_ms = 0
   if state in [WebRTCPeerConnection.STATE_FAILED,WebRTCPeerConnection.STATE_CLOSED]:
    rtc_fail("Connection failed • check network and exchange fresh codes","rtc_terminal")
@@ -580,11 +586,11 @@ func rtc_update(now: int):
     rtc_fail("Connection lost • exchange fresh codes; automatic reconnect is deferred","disconnect_timeout")
     return
   else: rtc_disconnected_ms = 0
-  if rtc_connect_ms > 0 and state != WebRTCPeerConnection.STATE_CONNECTED and now-rtc_connect_ms > 60000:
+  if rtc_connect_ms > 0 and state != WebRTCPeerConnection.STATE_CONNECTED and now-rtc_connect_ms > (10000 if quick_retry else 60000):
    rtc_fail("Connection timed out • check answer exchange and relay access","connect_timeout")
    return
   if not signal_finished:
-   if now-rtc_started_ms > 30000:
+   if now-rtc_started_ms > (10000 if quick_retry else 30000):
     rtc_fail("Connection gathering timed out • check browser/network and relay access","gather_timeout")
     return
    if rtc.get_gathering_state() == WebRTCPeerConnection.GATHERING_STATE_COMPLETE and local_signal.sdp != "":
@@ -600,6 +606,7 @@ func rtc_update(now: int):
      rtc_fail("Generated connection details exceed prototype limits")
      return
     signal_out.text = code
+    if lobby != null and lobby.active: lobby.next_poll = 0
     pairing_copy.disabled = false
     pairing_paste.disabled = mode != "host"
     pairing_hint.text = "HOST · 1 of 2\nCopy your invitation and send it to your guest. Then enter their reply." if mode == "host" else "JOIN · 2 of 2\nCopy your reply and send it to the host now. They must accept it to connect."

@@ -27,7 +27,7 @@ Player identity and [chat](player-chat.md) use a separate reliable adapter metad
 3. The adapters obtain temporary ICE configuration and exchange offer/answer/candidates through the room. ICE chooses the route; the default permits direct traffic and TURN fallback. Relay-only is a diagnostic mode; Compatibility (TLS 443) restricts the browser-to-relay leg to TLS/TCP port 443.
 4. The host advances authority at 60 fixed ticks/second. Guest ticks emit input packets; the host emits full snapshots at 20 Hz. The replica uses bounded [remote-actor position interpolation](snapshot-presentation.md); the guest's local actor uses [bounded C++ prediction/reconciliation](local-prediction.md) for immediate movement/pose feedback.
 5. Once both browsers report connected, the service deletes the signaling record and clients stop setup polling. Gameplay no longer depends on the directory. A selected TURN route still depends on the relay.
-6. An initial private-room transport failure offers one coordinated TLS compatibility retry while the room remains available. Other failed or ended sessions return to setup. Host migration, credential refresh and automatic reconnect/ICE restart are not implemented.
+6. An eligible initial private-room transport failure automatically requests one coordinated TLS compatibility retry while the room remains available. Other failed or ended sessions return to setup. Host migration, credential refresh and automatic reconnect/ICE restart are not implemented.
 
 Native solo/Host/Join uses the same core through the GDExtension. ENet is a separate transport with its own reachability requirements; native-to-browser play is not implemented. Advanced manual browser pairing remains a diagnostic alternative to the lobby.
 

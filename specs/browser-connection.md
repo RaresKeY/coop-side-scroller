@@ -8,7 +8,7 @@ GitHub Pages serves the game. Authenticated [private lobbies](private-lobbies.md
 
 Menu selects **Direct + relay fallback** (default), **Relay only (test)**, **Direct only** or **Compatibility (TLS 443)**. Relay modes require the private playtest key. Private room access requires that key in every route mode; direct-only advanced manual pairing can run without it using Google STUN.
 
-Private rooms offer **Retry with Compatibility (TLS 443)** after an initial transport failure when supported by the signaling service. Either player requests it; both restart together using fresh signaling and credentials. The default remains Direct + relay fallback. This applies to unfinished setup, not reconnect after an established session. See [private lobbies](private-lobbies.md) for epoch fencing and lifecycle.
+Private rooms automatically request **Compatibility (TLS 443)** after an eligible initial transport failure when supported by the signaling service. No retry click is needed: both restart together using fresh signaling and credentials. The default remains Direct + relay fallback. This applies once to unfinished setup, not reconnect after an established session. Credential/access failures, invalid signaling and service errors do not trigger a route switch. See [private lobbies](private-lobbies.md) for epoch fencing and lifecycle.
 
 **Compatibility (TLS 443)** uses relay-only ICE and retains only issuer-provided `turns:turn.cloudflare.com:443` URLs with absent or TCP transport. Missing TLS credentials fail setup explicitly; no UDP/direct fallback occurs. Both peers should choose this mode to route both access-network legs over TLS/TCP. The TURN relay candidate can still report `protocol: udp`; `relayProtocol: tls` identifies the browser-to-relay transport. TCP head-of-line blocking can increase gameplay latency under packet loss. This mode is a workaround to test, not evidence that a router caused an outage.
 
@@ -20,10 +20,10 @@ Timeouts use adapter monotonic time:
 
 | State | Bound |
 | --- | --- |
-| Gathering | 30 seconds to finish with a non-empty candidate list |
-| Remote description accepted | 60 seconds to connect |
+| Eligible private-room first attempt | 10 seconds for gathering or, after accepting the remote description, connecting; then automatically switch both peers to TLS |
+| TLS attempt, manual pairing or unsupported retry | 30 seconds gathering; 60 seconds after accepting the remote description to connect |
 | Established connection reports disconnected | 10-second recovery grace |
-| Explicit failed/closed | End the attempt |
+| Explicit failed/closed | Switch to TLS if eligible; otherwise end the attempt |
 
 A manual host waiting for the guest reply has no additional answer-wait deadline; ICE itself can still fail. There is no automatic reconnect/ICE restart. Error text distinguishes setup stages but is not a reliable diagnosis of a particular router/NAT. Telemetry omits candidate addresses, SDP and credentials.
 

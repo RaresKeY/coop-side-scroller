@@ -2,6 +2,14 @@ extends SceneTree
 const Codes = preload("res://src/connection_codes.gd")
 class FakeRTC extends WebRTCPeerConnectionExtension:
  var descriptions := 0
+ var remote_descriptions := 0
+ var candidates := 0
+ func _set_remote_description(_type: String, _sdp: String) -> Error:
+  remote_descriptions += 1
+  return OK
+ func _add_ice_candidate(_media: String, _index: int, _candidate: String) -> Error:
+  candidates += 1
+  return OK
  var state := WebRTCPeerConnection.STATE_NEW
  var gathering := WebRTCPeerConnection.GATHERING_STATE_NEW
  func _get_connection_state() -> WebRTCPeerConnection.ConnectionState: return state
@@ -16,6 +24,8 @@ class FakeLobby extends "res://src/private_lobby.gd":
  signal complete_request
  var response := {}
  var sent := {}
+ var clock := -1
+ func now_ms() -> int: return clock if clock >= 0 else Time.get_ticks_msec()
  func request_data(_data: Dictionary, _generation: int) -> Dictionary:
   sent = _data.duplicate(true)
   await complete_request
@@ -116,6 +126,17 @@ func scene_checks():
  scene.rtc_accept()
  check(scene.rtc == pending and scene.status.text.begins_with("Answer does not match"),"Stale answer replaced pending offer")
  scene.solo()
+ # A reply racing the frame poll must not call a terminal browser peer.
+ for terminal_state in [WebRTCPeerConnection.STATE_FAILED,WebRTCPeerConnection.STATE_CLOSED]:
+  var ended = FakeRTC.new()
+  ended.state = terminal_state
+  scene.rtc = ended
+  scene.mode = "host"
+  scene.local_signal = {"session":"0123456789abcdef0123456789abcdef"}
+  scene.signal_in.text = Codes.encode({"game":"ember-coop","version":2,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"answer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]})
+  scene.rtc_accept()
+  check(scene.rtc==null and ended.remote_descriptions==0 and ended.candidates==0,"Terminal signaling race called a failed/closed peer")
+  scene.solo()
  # Exercise failure branches without pretending to test actual NAT traversal.
  for reason in ["gather", "empty", "connect", "failed", "disconnect", "wait"]:
   var fake = FakeRTC.new()
@@ -223,7 +244,7 @@ func scene_checks():
  # Definitive expiry immediately restores the directory, without a stale retry.
  fake_lobby.response = {"error":"Closed","status":404,"code":"room_expired"}
  fake_lobby.sync_room();fake_lobby.complete_request.emit()
- check(fake_lobby.active and fake_lobby.room_id.is_empty() and fake_lobby.panel.visible and not fake_lobby.retry_button.visible,"Expired setup retained a dead room/retry instead of directory")
+ check(fake_lobby.active and fake_lobby.room_id.is_empty() and fake_lobby.panel.visible and not fake_lobby.retry_requested,"Expired setup retained a dead room/retry instead of directory")
  fake_lobby.response = {"version":1,"rooms":[]}
  fake_lobby.complete_request.emit() # pending best-effort leave / directory refresh
  fake_lobby.complete_request.emit()
@@ -293,14 +314,14 @@ func scene_checks():
  var setup_failures = scene.diagnostics.events.filter(func(e): return e.event == "failure")
  check(setup_failures.back().source == "lobby_errors" and not setup_failures.back().established,"Setup failure attribution incorrect")
  # Entry advertises support before the first sync so immediate ICE failures
- # still offer a retry. A later sync must not be required to learn this.
+ # still start a retry. A later sync must not be required to learn this.
  fake_lobby.active = true
  fake_lobby.response = {"version":1,"id":"ABCDEF12","role":"client","retrySupported":true}
  fake_lobby.enter_room("join","ABCDEF12")
  fake_lobby.complete_request.emit()
  scene.rtc_route_mode = 0
  check(fake_lobby.retry_supported and fake_lobby.sent.action == "join","Entry did not retain retry capability")
- check(fake_lobby.offer_compatibility_retry("No candidates","no_candidates"),"Failure before first sync lost retry offer")
+ check(fake_lobby.retry_compatibility("no_candidates"),"Failure before first sync lost retry offer")
  fake_lobby.room_id = "" # This fixture teardown has no server room to leave.
  scene.solo()
  # Failed setup retains membership only when the service supports retry.
@@ -309,27 +330,26 @@ func scene_checks():
  fake_lobby.role = "client"
  scene.connection_route.select(0)
  scene.rtc_route_mode = 0
- check(not fake_lobby.offer_compatibility_retry("Connection failed","rtc_terminal"),"Old service offered unsupported retry")
+ check(not fake_lobby.retry_compatibility("rtc_terminal"),"Old service offered unsupported retry")
  fake_lobby.retry_supported = true
- check(not fake_lobby.offer_compatibility_retry("Relay denied","setup"),"Credential failure offered transport retry")
+ check(not fake_lobby.retry_compatibility("setup"),"Credential failure offered transport retry")
  var established_peer = FakeRTC.new()
  established_peer.state = WebRTCPeerConnection.STATE_CONNECTED
  scene.rtc = established_peer
- check(not fake_lobby.offer_compatibility_retry("Disconnected","disconnect_timeout"),"Established transport offered setup retry before lobby sampled it")
+ check(not fake_lobby.retry_compatibility("disconnect_timeout"),"Established transport offered setup retry before lobby sampled it")
  check(scene.rtc == established_peer,"Rejected retry closed connected transport")
  scene.reset_network()
  fake_lobby.transport_established = false
  var failed_peer = FakeRTC.new()
  scene.rtc = failed_peer
- check(fake_lobby.offer_compatibility_retry("Disconnected before connecting","disconnect_timeout"),"Unestablished disconnect did not offer compatibility retry")
- check(scene.rtc == null and fake_lobby.active and fake_lobby.retry_button.visible,"Retry did not retain room and tear down failed transport")
- fake_lobby.retry_button.pressed.emit()
+ check(fake_lobby.retry_compatibility("disconnect_timeout"),"Unestablished disconnect did not start compatibility retry")
+ check(scene.rtc == null and fake_lobby.active and fake_lobby.retry_requested and fake_lobby.next_poll == 0,"Retry did not retain room and tear down failed transport")
  fake_lobby.response = {"version":1,"epoch":1,"retrySupported":true,"signal":""}
  fake_lobby.sync_room()
  check(fake_lobby.sent.retryTls and fake_lobby.sent.epoch == 0 and not fake_lobby.sent.ready,"Retry request did not fence old attempt")
  fake_lobby.complete_request.emit()
  check(fake_lobby.epoch == 1 and scene.connection_route.selected == 0 and scene.selected_connection_route() == 3 and not fake_lobby.setup_failed and not fake_lobby.accepted and not fake_lobby.published,"Retry did not reset client for fresh TLS offer")
- check(not fake_lobby.offer_compatibility_retry("Failed again","rtc_terminal"),"TLS retry offered repeatedly")
+ check(not fake_lobby.retry_compatibility("rtc_terminal"),"TLS retry offered repeatedly")
  # Compatibility status survives normal polling instead of reverting to an
  # ordinary route label.
  check(fake_lobby.panel.visible,"Coordinated retry did not restore setup panel")
@@ -337,7 +357,7 @@ func scene_checks():
  fake_lobby.sync_room()
  fake_lobby.complete_request.emit()
  check(scene.status.text.contains("Compatibility (TLS 443)"),"Polling hid active compatibility route")
- # A peer that did not click retry switches on the next sync too.
+ # A peer that did not fail locally switches on the next sync too.
  fake_lobby.epoch = 0
  fake_lobby.setup_failed = false
  fake_lobby.retry_requested = false
@@ -358,7 +378,7 @@ func scene_checks():
  fake_lobby.complete_request.emit()
  check(scene.selected_connection_route() == 0,"Retry forced TLS for a later room")
  check(scene.connection_route.selected == 0,"Late retry response changed route after leaving")
- check(fake_lobby.epoch == 0 and not fake_lobby.retry_supported and not fake_lobby.retry_requested and not fake_lobby.retry_button.visible,"Leaving retained retry state")
+ check(fake_lobby.epoch == 0 and not fake_lobby.retry_supported and not fake_lobby.retry_requested and not fake_lobby.retry_requested,"Leaving retained retry state")
  # If an older partner joins while a failed host is waiting to retry, the
  # next poll must close setup with actionable guidance instead of hanging.
  fake_lobby.active = true
@@ -370,6 +390,92 @@ func scene_checks():
  fake_lobby.complete_request.emit()
  check(not fake_lobby.active and scene.setup_menu.visible and scene.status.text.contains("reload"),"Mixed-version failed setup stranded a room")
  fake_lobby.complete_request.emit() # Best-effort leave fixture.
+ # Faster sync is a finite burst, not permanent high-rate polling.
+ fake_lobby.clock = 1000
+ fake_lobby.fast_poll_until = 0
+ fake_lobby.start_fast_sync()
+ check(fake_lobby.sync_delay_ms()==500,"Active signaling did not use fast polling")
+ fake_lobby.clock = 8999
+ fake_lobby.start_fast_sync()
+ check(fake_lobby.fast_poll_until==9000,"Repeated polls extended the burst")
+ fake_lobby.clock = 9000
+ check(fake_lobby.sync_delay_ms()==2000,"Fast polling did not return to its bounded idle cadence")
+ # Failure while HTTP is pending must queue retry, preserve membership and
+ # retire the old response without waiting for the normal poll interval.
+ fake_lobby.clock = 10000
+ fake_lobby.active = true
+ fake_lobby.room_id = "ABCDEF12"
+ fake_lobby.role = "client"
+ fake_lobby.epoch = 0
+ fake_lobby.retry_supported = true
+ scene.rtc_route_mode = 0
+ scene.signal_finished = false
+ fake_lobby.published = false
+ fake_lobby.response = {"version":1,"epoch":0,"retrySupported":true,"players":2,"signal":""}
+ fake_lobby.sync_room()
+ check(not fake_lobby.sent.retryTls,"Normal sync requested an unneeded retry")
+ check(fake_lobby.retry_compatibility("rtc_terminal"),"In-flight failure did not queue automatic retry")
+ check(fake_lobby.busy and fake_lobby.retry_requested,"Retry overlapped or discarded the pending request")
+ fake_lobby.complete_request.emit()
+ check(fake_lobby.active and fake_lobby.next_poll==0 and fake_lobby.setup_failed,"Old response delayed or resurrected failed setup")
+ fake_lobby.response = {"version":1,"epoch":1,"retrySupported":true,"players":2,"signal":""}
+ fake_lobby.sync_room()
+ check(fake_lobby.sent.retryTls and fake_lobby.sent.epoch==0,"Queued failure needed a player click")
+ fake_lobby.complete_request.emit()
+ check(fake_lobby.epoch==1 and fake_lobby.fast_poll_until==18000,"Coordinated retry did not start a fresh bounded burst")
+ # Gathering can also complete during sync; publish that work immediately.
+ fake_lobby.epoch = 0
+ fake_lobby.retry_requested = false
+ fake_lobby.setup_failed = false
+ fake_lobby.published = false
+ fake_lobby.accepted = false
+ scene.signal_finished = false
+ scene.signal_out.text = ""
+ fake_lobby.response = {"version":1,"epoch":0,"retrySupported":true,"players":2,"signal":""}
+ fake_lobby.sync_room()
+ scene.signal_finished = true
+ scene.signal_out.text = "prepared-offer"
+ fake_lobby.complete_request.emit()
+ check(fake_lobby.next_poll==0 and not fake_lobby.published,"In-flight gathering completion waited for another poll")
+ fake_lobby.sync_room()
+ check(fake_lobby.sent.signal=="prepared-offer","Ready signal was not published on the next request")
+ fake_lobby.complete_request.emit()
+ check(fake_lobby.published and fake_lobby.next_poll>fake_lobby.clock,"Published signal caused a busy poll loop")
+ # Invalid access/rate-limit/unsupported service codes do not trigger TLS.
+ for response in [{"status":401,"code":"access_denied"},{"status":403,"code":"origin_denied"},{"status":429,"code":"rate_limited"},{"status":409,"code":"retry_unsupported"}]:
+  fake_lobby.active = true
+  fake_lobby.room_id = "ABCDEF12"
+  fake_lobby.retry_supported = true
+  fake_lobby.response = response.duplicate()
+  fake_lobby.response.error = fake_lobby.service_error(response.status,response.code)
+  fake_lobby.sync_room()
+  fake_lobby.complete_request.emit()
+  check(not fake_lobby.active and not fake_lobby.retry_requested and scene.status.text.contains(response.code),"Permanent service failure retried instead of retaining its code")
+  fake_lobby.complete_request.emit() # Best-effort leave.
+ # Only the eligible first private attempt gets the ten-second bound.
+ # Native FakeRTC uses the real timeout/failure path, not real NAT traversal.
+ for route in [0,3]:
+  for phase in ["gather","connect"]:
+   fake_lobby.active = true
+   fake_lobby.room_id = "ABCDEF12"
+   fake_lobby.epoch = 0 if route==0 else 1
+   fake_lobby.retry_supported = true
+   fake_lobby.transport_established = false
+   scene.rtc_route_mode = route
+   var timed_peer = FakeRTC.new()
+   timed_peer.state = WebRTCPeerConnection.STATE_CONNECTING
+   scene.rtc = timed_peer
+   scene.local_signal = {"sdp":"v=0","ice":[]}
+   scene.signal_finished = phase=="connect"
+   scene.rtc_started_ms = 1000
+   scene.rtc_connect_ms = 1000 if phase=="connect" else 0
+   var limit = 10000 if route==0 else 30000 if phase=="gather" else 60000
+   scene.rtc_update(1000+limit-1)
+   check(scene.rtc==timed_peer,"Setup bound ended too early: "+phase+str(route))
+   scene.rtc_update(1000+limit+1)
+   check(scene.rtc==null and scene.setup_menu.visible,"Setup bound was not enforced: "+phase+str(route))
+   fake_lobby.complete_request.emit() # Best-effort leave.
+ fake_lobby.clock = -1
  fake_lobby.room_id = "" # Fixture cleanup needs no HTTP leave.
  scene.solo()
  print("CONNECTION CODE/SETUP TEST ","FAIL" if failed else "PASS")

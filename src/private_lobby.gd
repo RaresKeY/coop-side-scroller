@@ -1,6 +1,9 @@
 extends Node
 # HTTP signaling adapter only. The portable core never sees room/auth data.
 const ENDPOINT := "https://ember-coop-credentials.ember-bridge-playtests.workers.dev/v1/lobby"
+const FAST_SYNC_MS := 500
+const FAST_SYNC_WINDOW_MS := 8000
+const SYNC_MS := 2000
 var game
 var panel: VBoxContainer
 var rows: VBoxContainer
@@ -24,7 +27,7 @@ var published := false
 var transport_established := false
 var failures := 0
 var listed_rooms := ""
-var retry_button: Button
+var fast_poll_until := 0
 var retry_supported := false
 var retry_requested := false
 var setup_failed := false
@@ -72,16 +75,6 @@ func setup(owner_game, canvas):
  refresh_button.custom_minimum_size.y = 36
  refresh_button.pressed.connect(refresh)
  panel.add_child(refresh_button)
- retry_button = Button.new()
- retry_button.text = "Retry with Compatibility (TLS 443)"
- retry_button.custom_minimum_size.y = 36
- retry_button.hide()
- retry_button.pressed.connect(func():
-  retry_requested = true
-  retry_button.disabled = true
-  hint.text = "Requesting compatibility retry for both players…"
-  next_poll = 0)
- panel.add_child(retry_button)
  rows = VBoxContainer.new()
  panel.add_child(rows)
  var back = Button.new()
@@ -89,6 +82,15 @@ func setup(owner_game, canvas):
  back.custom_minimum_size.y = 36
  back.pressed.connect(func(): game.solo(); game.setup_menu.show())
  panel.add_child(back)
+
+func now_ms() -> int: return Time.get_ticks_msec()
+
+func start_fast_sync():
+ # One bounded burst per epoch keeps the two-player polling budget finite.
+ if fast_poll_until == 0: fast_poll_until = now_ms()+FAST_SYNC_WINDOW_MS
+
+func sync_delay_ms() -> int:
+ return FAST_SYNC_MS if now_ms()<fast_poll_until else SYNC_MS
 
 func request_data(data: Dictionary, request_generation: int) -> Dictionary:
  var request = HTTPRequest.new()
@@ -165,7 +167,7 @@ func refresh():
  var result = await request_data({"action":"list"},attempt)
  if attempt != generation or directory_attempt != directory_generation: return
  listing_busy = false
- next_poll = Time.get_ticks_msec()+5000
+ next_poll = now_ms()+5000
  if result.has("error"):
   hint.text = result.error + " · refreshing…" if int(result.get("status",0)) not in [401,403,429] else result.error
   # Failed refreshes invalidate the buttons too. Never offer rooms from a
@@ -237,6 +239,8 @@ func enter_room(action: String, id: String = ""):
   return
  room_id = result.id
  role = result.role
+ fast_poll_until = 0
+ if role == "client": start_fast_sync()
  retry_supported = result.get("retrySupported",false) == true
  accepted = false
  published = false
@@ -255,30 +259,33 @@ func enter_room(action: String, id: String = ""):
  # partner joins, so a long wait never leaves stale relay credentials in a room.
  next_poll = 0
 
-func offer_compatibility_retry(message: String, source: String) -> bool:
+func can_retry_compatibility() -> bool:
+ if not active or room_id.is_empty(): return false
  remember_connection()
- if not active or room_id.is_empty() or transport_established or epoch != 0 or game.rtc_route_mode == 3 or not retry_supported:
+ return not transport_established and epoch == 0 and game.rtc_route_mode != 3 and retry_supported
+
+func retry_compatibility(source: String) -> bool:
+ if source not in ["rtc_terminal","connect_timeout","gather_timeout","no_candidates","disconnect_timeout","multiplayer_connect_failed"] or not can_retry_compatibility():
   return false
- if source not in ["rtc_terminal","connect_timeout","gather_timeout","no_candidates","disconnect_timeout","multiplayer_connect_failed"]:
-  return false
+ if setup_failed: return true
  game.reset_network()
  game.mode = "solo"
  game.core.configure(1)
  game.sync_core_view()
  setup_failed = true
+ retry_requested = true
+ next_poll = 0
  game.setup_menu.hide()
  game.signal_panel.hide()
  panel.show()
- hint.text = message.replace("check network and exchange fresh codes","retry this room").replace("check answer exchange and relay access","retry this room") + "\nRetry switches both players to Compatibility (TLS 443)."
- retry_button.show()
- retry_button.disabled = false
+ hint.text = "Switching both players to Compatibility (TLS 443)…"
  return true
 
 func restart_compatibility(attempt: int):
  epoch = 1
+ fast_poll_until = now_ms()+FAST_SYNC_WINDOW_MS
  setup_failed = false
  retry_requested = false
- retry_button.hide()
  accepted = false
  published = false
  transport_established = false
@@ -304,7 +311,7 @@ func remember_connection():
 
 func _process(_dt):
  if active: remember_connection()
- if not active or busy or Time.get_ticks_msec()<next_poll: return
+ if not active or busy or now_ms()<next_poll: return
  if room_id.is_empty():
   if panel.visible: refresh()
  else: sync_room()
@@ -314,13 +321,14 @@ func sync_room():
  var attempt = generation
  remember_connection()
  var signal_code = game.signal_out.text if game.signal_finished and not published else ""
- var result = await request_data({"action":"sync","id":room_id,"seat":seat,"signal":signal_code,"ready":transport_established,"epoch":epoch,"retryTls":retry_requested},attempt)
+ var requesting_retry = retry_requested
+ var result = await request_data({"action":"sync","id":room_id,"seat":seat,"signal":signal_code,"ready":transport_established,"epoch":epoch,"retryTls":requesting_retry},attempt)
  if attempt != generation: return
  # ICE can connect while HTTP is in flight, then temporarily disconnect.
  # Keep established sessions under the transport's own liveness deadlines.
  remember_connection()
  busy = false
- next_poll = Time.get_ticks_msec()+2000
+ next_poll = now_ms()+sync_delay_ms()
  if result.has("error"):
   # A connected game no longer depends on its signaling room. The other peer
   # may already have completed cleanup; never tear gameplay down for this.
@@ -334,17 +342,27 @@ func sync_room():
    open()
    hint.text = "Previous room expired or closed · choose another or create one"
    return
+  if int(result.get("status",0)) in [401,403,429] or result.get("code","") == "retry_unsupported":
+   game.rtc_fail("Room setup failed: "+str(result.error),"lobby_errors")
+   return
+  next_poll = now_ms()+SYNC_MS
   failures += 1
   hint.text = result.error + " · diagnostic " + game.diagnostics.id + " · retrying…"
   if failures >= 3: game.rtc_fail("Room setup failed: " + str(result.error) + " · open Private rooms and retry","lobby_errors")
   return
  failures = 0
  retry_supported = result.get("retrySupported",false) == true
+ if result.get("players",1) == 2: start_fast_sync()
+ next_poll = now_ms()+sync_delay_ms()
+ # A failure or completed gathering can arrive while this old sync is in flight.
+ # Send its newly queued work immediately, without overlapping HTTP requests.
+ if (retry_requested and not requesting_retry) or (signal_code.is_empty() and game.signal_finished and not published):
+  next_poll = 0
  if result.get("epoch",0) == 1 and epoch == 0:
   await restart_compatibility(attempt)
   return
  if setup_failed:
-  if not retry_supported:
+  if not retry_supported or requesting_retry:
    game.rtc_fail("Both players must reload the game before a compatibility retry","retry_unsupported")
   return
  if not signal_code.is_empty(): published = true
@@ -384,10 +402,10 @@ func close():
  directory_generation += 1
  listing_busy = false
  epoch = 0
+ fast_poll_until = 0
  retry_supported = false
  retry_requested = false
  setup_failed = false
- retry_button.hide()
  active = false
  busy = false
  room_id = ""
