@@ -7,27 +7,19 @@ This script never creates or deletes cloud resources.
 import argparse,json,os,signal,subprocess,sys,tempfile,time,urllib.request
 from pathlib import Path
 from browser_cdp import CDP
+from browser_ui import enter_invite,settings_route,read_invite
 from browser_cross_network import Remote, ROUTE, SAFE
 from browser_relay import INSTRUMENT,wait_until,type_text,key,diagnostic_uploads_ok
 ROOT=Path(__file__).resolve().parents[1]
 URL='https://rareskey.github.io/coop-side-scroller/'
 
-def access_key(page, token):
- # Published builds before the text-entry patch still use Godot LineEdit.
- # Detect the real dialog so this harness also accepts the patched UI.
- page.click(160,283)
- if page.evaluate("!!document.querySelector('[data-ember-paste]')"):
-  page.call('Input.insertText',{'text':token})
-  point=page.evaluate("(()=>{const r=document.querySelector('[data-ember-accept]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
-  if isinstance(page,Remote):page.browser.click(point['x'],point['y'])
-  else:page.click(point['x'],point['y'])
-  return 'native DOM'
- type_text(page,token)
- return 'Godot key events'
+def access_key(page,token):
+ enter_invite(page,token)
+ return 'native password form'
 
 RENDERER="""(()=>{const gl=document.querySelector('canvas').getContext('webgl2'),ext=gl.getExtension('WEBGL_debug_renderer_info');return ext?gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER)})()"""
 def run():
- parser=argparse.ArgumentParser();parser.add_argument('--local-candidate',type=Path);parser.add_argument('--tls',action='store_true');parser.add_argument('--controller-dir',type=Path,default=ROOT.parent/'tooling/runpod-browser');args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--invite-stdin',action='store_true');parser.add_argument('--local-candidate',type=Path);parser.add_argument('--tls',action='store_true');parser.add_argument('--controller-dir',type=Path,default=ROOT.parent/'tooling/runpod-browser');args=parser.parse_args()
  output=ROOT/'build';output.mkdir(exist_ok=True)
  # Keep historical success, but never leave it labelled as the current attempt.
  started=time.time()
@@ -37,7 +29,7 @@ def run():
   sys.path.insert(0,str(args.controller_dir));from client import Browser
   remote=Browser();health=remote.request('/health');assert health['ready'],'Controller not ready'
   guest=Remote(remote)
-  token=json.loads((Path.home()/'.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
+  token=read_invite(args.invite_stdin)
  except Exception as error:
   report_path.write_text(json.dumps({'result':'fail','started_at_unix':started,'stage':'preflight','error_type':type(error).__name__})+'\n')
   raise SystemExit('Lobby test preflight failed; see sanitized latest report') from None
@@ -65,27 +57,21 @@ def run():
    for page in [host,guest]:
     wait_until(lambda:page.evaluate('globalThis.EmberCoreWeb?.diagnostics().calls>120'),90)
     input_modes.append(access_key(page,token))
-    page.click(180,317)
-    if args.tls:
-     page.capture(output/('tls-route-host.png' if page is host else 'tls-route-guest.png'))
-     page.click(160,432) # Fourth popup item: Compatibility (TLS 443).
-    else:page.click(160,378)
-   stage='create room';host.click(160,216)
+    settings_route(page,3 if args.tls else 1)
+   stage='create room';host.click(160,241)
    wait_until(lambda:host.evaluate('Array.isArray(globalThis.testRoomList)'),15)
    time.sleep(.5) # Allow Godot to consume HTTP completion and re-enable Create.
    host.capture(output/'lobby-cross-network-directory.png')
-   host.click(160,201)
+   host.click(160,240)
    room_id=wait_until(lambda:host.evaluate('globalThis.testRoomId'),15)
    host.capture(output/'lobby-cross-network-waiting.png')
-   if args.tls:
-    wait_until(lambda:host.evaluate('testPeers.at(-1)?.getConfiguration().iceTransportPolicy==="relay"'),5)
    print('HOST ROOM CREATED',flush=True)
-   stage='join room';guest.click(160,216)
+   stage='join room';guest.click(160,241)
    wait_until(lambda:guest.evaluate('globalThis.testRoomList?.some(r=>r.id==='+json.dumps(room_id)+')'),15)
    index=guest.evaluate('testRoomList.findIndex(r=>r.id==='+json.dumps(room_id)+')')
    assert 0<=index<3,'Test room outside visible rows; do not join another room'
    guest.capture(output/'lobby-cross-network-list.png')
-   guest.click(160,285+index*36)
+   guest.click(160,338+index*36)
    print('GUEST JOINED THROUGH DIRECTORY',flush=True)
    stage='automatic signaling'
    for page in [host,guest]:wait_until(lambda:page.evaluate('testPeers.at(-1)?.connectionState==="connected" && EmberCoreWeb.diagnostics().views[0].actors===2'),40)

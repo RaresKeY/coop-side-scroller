@@ -1,4 +1,5 @@
-import {handle,diagnosticReport} from './worker.mjs';
+import {handle,inviteVerifier,diagnosticReport} from './worker.mjs';
+const invitationHash = await inviteVerifier("invitation");
 const check=(x,m='assertion failed')=>{if(!x)throw Error(m);};
 const report=()=>({version:1,build:'diagnostics-v1',attempt:'a'.repeat(16),events:[{event:'http',ms:1,role:'host',action:'sync',status:404,code:'room_expired'}]});
 Deno.test('Reports reject arbitrary text, credentials, addresses and unbounded events',()=>{
@@ -8,7 +9,7 @@ Deno.test('Reports reject arbitrary text, credentials, addresses and unbounded e
  }
 });
 Deno.test('Diagnostic upload is authenticated, origin protected and independently rate limited',async()=>{
- const env={LOBBIES:{idFromName:x=>x,get:()=>({fetch:()=>Response.json({version:1})})},TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master',PLAYTEST_TOKEN:'invitation',INVITE_EXPIRES_AT:String(Date.now()/1000+600|0),ISSUE_LIMIT:{limit:()=>({success:true})},TOTAL_LIMIT:{limit:()=>({success:true})},DIAGNOSTIC_LIMIT:{limit:()=>({success:true})},DIAGNOSTIC_TOTAL:{limit:()=>({success:true})}};
+ const env={LOBBIES:{idFromName:x=>x,get:()=>({fetch:()=>Response.json({version:1})})},TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master',PLAYTEST_TOKEN_SHA256:invitationHash,INVITE_EXPIRES_AT:String(Date.now()/1000+600|0),ISSUE_LIMIT:{limit:()=>({success:true})},TOTAL_LIMIT:{limit:()=>({success:true})},DIAGNOSTIC_LIMIT:{limit:()=>({success:true})},DIAGNOSTIC_TOTAL:{limit:()=>({success:true})}};
  const send=(value=report(),auth='invitation')=>handle(new Request('https://issuer.example/v1/diagnostics',{method:'POST',headers:{Origin:'https://rareskey.github.io',Authorization:'Bearer '+auth,'Content-Type':'application/json'},body:JSON.stringify(value)}),env);
  const captured=[],original=console.log;console.log=value=>captured.push(value);
  try{
@@ -34,7 +35,7 @@ Deno.test('Failed ICE reports accept bounded enums/counts but reject private ser
 });
 
 Deno.test('Diagnostic malformed bodies differ from storage outages on each hosted origin',async()=>{
- const env={TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master',PLAYTEST_TOKEN:'invitation',INVITE_EXPIRES_AT:String(Math.floor(Date.now()/1000)+600),ISSUE_LIMIT:{},TOTAL_LIMIT:{},DIAGNOSTIC_LIMIT:{limit:()=>({success:true})},DIAGNOSTIC_TOTAL:{limit:()=>({success:true})},LOBBIES:{idFromName:x=>x,get:()=>({fetch:()=>{throw Error('private storage failure');}})}};
+ const env={TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master',PLAYTEST_TOKEN_SHA256:invitationHash,INVITE_EXPIRES_AT:String(Math.floor(Date.now()/1000)+600),ISSUE_LIMIT:{},TOTAL_LIMIT:{},DIAGNOSTIC_LIMIT:{limit:()=>({success:true})},DIAGNOSTIC_TOTAL:{limit:()=>({success:true})},LOBBIES:{idFromName:x=>x,get:()=>({fetch:()=>{throw Error('private storage failure');}})}};
  for(const origin of ['https://rareskey.github.io','https://ember-bridge-playtest.web.app','https://ember-bridge-playtest.firebaseapp.com']){
   const send=body=>handle(new Request('https://issuer.example/v1/diagnostics',{method:'POST',headers:{Origin:origin,Authorization:'Bearer invitation'},body}),env);
   const malformed=await send('{');check(malformed.status===400);

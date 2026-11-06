@@ -20,6 +20,7 @@ import time
 import urllib.request
 
 from browser_cdp import CDP, QuietHandler
+from browser_ui import read_invite
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -53,7 +54,9 @@ def main():
     route.add_argument('--relay', action='store_true')
     route.add_argument('--local-only', action='store_true', help='Use host candidates only; no external STUN/TURN')
     parser.add_argument('--headless', action='store_true', help='Protocol checks only; does not prove GPU rendering')
+    parser.add_argument('--invite-stdin', action='store_true', help='Read an invite from a protected pipe')
     args = parser.parse_args()
+    invitation = read_invite(args.invite_stdin) if args.relay else None
     if not args.headless and not os.environ.get('WAYLAND_DISPLAY') and not os.environ.get('DISPLAY'):
         parser.error('Run under gamescope --backend headless; see specs/deterministic-coop.md')
     out = ROOT / 'build/deterministic'
@@ -117,7 +120,6 @@ def main():
                     return []
                 if not args.relay:
                     return [{'urls': ['stun:stun.cloudflare.com:3478']}]
-                invitation = json.loads((Path.home() / '.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
                 # Secret stays in memory; no URL, page storage, report or logs.
                 result = page.evaluate("""(async()=>{const response=await fetch(
                   'https://ember-coop-credentials.ember-bridge-playtests.workers.dev/v1/ice',

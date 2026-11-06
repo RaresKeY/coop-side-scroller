@@ -6,7 +6,7 @@ GitHub Pages serves the game. Authenticated [private lobbies](private-lobbies.md
 
 ## Modes and lifecycle
 
-Menu selects **Direct + relay fallback** (default), **Relay only (test)**, **Direct only** or **Compatibility (TLS 443)**. Relay modes require the private playtest key. Private room access requires that key in every route mode; direct-only advanced manual pairing can run without it using Google STUN.
+After [invite onboarding](onboarding-settings.md), Settings at the bottom left selects **Direct + relay fallback** (default), **Relay only (test)**, **Direct only** or **Compatibility (TLS 443)**. Browser onboarding requires the private invite before the main menu. Private room access and relay issuance validate it again. Direct-only advanced pairing uses Google STUN without relay issuance; it remains behind the browser invite gate.
 
 Private rooms automatically request **Compatibility (TLS 443)** after an eligible initial transport failure when supported by the signaling service. No retry click is needed: both restart together using fresh signaling and credentials. The default remains Direct + relay fallback. This applies once to unfinished setup, not reconnect after an established session. Credential/access failures, invalid signaling and service errors do not trigger a route switch. See [private lobbies](private-lobbies.md) for epoch fencing and lifecycle.
 
@@ -48,13 +48,13 @@ Adapter envelope 2 includes the named-player/chat RPC layout; envelope-1 peers m
 
 ## Advanced manual pairing
 
-Host automatically prepares an invitation; Join accepts an invitation and generates a reply. Each side has role-specific Copy/Enter actions. Copy is disabled until gathering finishes, and guest entry is disabled after producing its reply. Wrong-role codes reject. Raw codes remain hidden during ordinary gameplay/setup.
+Settings → Manual connection (advanced) exposes Host/Join. Host automatically prepares an invitation; Join accepts an invitation and generates a reply. Each side has role-specific Copy/Enter actions. Copy is disabled until gathering finishes, and guest entry is disabled after producing its reply. Wrong-role codes reject. Raw codes remain hidden during ordinary gameplay/setup.
 
 The host sends its invitation, the guest returns a reply, and the host accepts that reply. This diagnostic two-way exchange remains timing-sensitive; the primary lobby automates it. A separate playtest key is still needed when using relay modes.
 
 ## Browser text and copy dialogs
 
-Access-key, room-name and player-name fields open a browser-native single-line input on click or Enter/Space. The dialog selects existing text, supports Enter to confirm, bounds length, disables autocomplete and masks the access key. Cancel preserves the prior value. Native builds use ordinary engine editing.
+The invite uses the separate [first-screen password field](onboarding-settings.md), with password-manager semantics and no game-owned persistence. Room-name and player-name fields open a browser-native single-line input on click or Enter/Space. The dialog selects existing text, supports Enter to confirm, bounds length and disables autocomplete. Cancel preserves the prior value. Native builds use ordinary engine editing.
 
 Manual connection entry uses a focused browser-native textarea with Continue/Cancel and normal browser paste. It does not read the asynchronous Clipboard API or rely on Godot's cached clipboard. Dialogs are compact and scrollable over a dimmed game, preserving scene context.
 

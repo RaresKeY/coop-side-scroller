@@ -1,7 +1,8 @@
-import {handle,publicServers,TTL} from './worker.mjs';
+import {handle,inviteVerifier,publicServers,TTL} from './worker.mjs';
+const invitationHash = await inviteVerifier("private-invitation");
 const check=(value,message)=>{if(!value)throw new Error(message);};
 const origin='https://rareskey.github.io';
-const env=()=>({TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master-never-public',PLAYTEST_TOKEN:'private-invitation',INVITE_EXPIRES_AT:String(Math.floor(Date.now()/1000)+600),ISSUE_LIMIT:{limit:()=>({success:true})},TOTAL_LIMIT:{limit:()=>({success:true})}});
+const env=()=>({TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master-never-public',PLAYTEST_TOKEN_SHA256:invitationHash,INVITE_EXPIRES_AT:String(Math.floor(Date.now()/1000)+600),ISSUE_LIMIT:{limit:()=>({success:true})},TOTAL_LIMIT:{limit:()=>({success:true})}});
 const request=(options={})=>new Request('https://issuer.example/v1/ice',{method:'POST',headers:{Origin:origin,Authorization:'Bearer private-invitation',...options.headers},...options});
 const credentials={iceServers:[{urls:['stun:stun.cloudflare.com:3478','stun:stun.cloudflare.com:53']},{urls:['turn:turn.cloudflare.com:3478?transport=udp','turns:turn.cloudflare.com:443?transport=tcp'],username:'temporary-user',credential:'temporary-password'}]};
 let calls=0;
@@ -40,4 +41,16 @@ Deno.test('Provider failures are redacted and invalid provider ICE is rejected',
 Deno.test('Redirects never forward the master credential',async()=>{
  let count=0;const result=await handle(request(),env(),async(_url,options)=>{count++;check(options.redirect==='manual','redirect following enabled');return new Response(null,{status:302,headers:{Location:'https://evil.invalid'}});});
  check(result.status===502 && count===1,'redirect was followed');
+});
+
+Deno.test('Invite verification persists only a digest and rejects digest replay or legacy secrets',async()=>{
+ const good=env();
+ check(!('PLAYTEST_TOKEN' in good),'fixture retained raw invite binding');
+ check((await handle(request(),good,upstream)).status===200,'hashed invite refused');
+ const before=calls;
+ check((await handle(request({headers:{Origin:origin,Authorization:'Bearer '+invitationHash}}),good,upstream)).status===401,'stored digest authenticated directly');
+ for(const config of [{...good,PLAYTEST_TOKEN_SHA256:undefined},{...good,PLAYTEST_TOKEN_SHA256:'bad'},{...good,PLAYTEST_TOKEN:'private-invitation'}]){
+  check((await handle(request(),config,upstream)).status===503,'legacy/malformed verifier accepted');
+ }
+ check(calls===before,'rejected hash/legacy config minted credentials');
 });

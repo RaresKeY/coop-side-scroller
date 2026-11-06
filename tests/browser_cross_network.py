@@ -7,6 +7,7 @@ This script never creates or deletes cloud resources.
 import argparse,json,signal,subprocess,sys,tempfile,time,urllib.request
 from pathlib import Path
 from browser_cdp import CDP
+from browser_ui import enter_invite,settings_route,read_invite
 from browser_relay import INSTRUMENT,wait_until,type_text,key,enter_code
 ROOT=Path(__file__).resolve().parents[1]
 URL='https://rareskey.github.io/coop-side-scroller/'
@@ -30,7 +31,7 @@ def enter(page,text):
  else:page.click(point['x'],point['y'])
  time.sleep(.15)
 def run():
- parser=argparse.ArgumentParser();parser.add_argument('--controller-dir',type=Path,default=ROOT.parent/'tooling/runpod-browser');args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--invite-stdin',action='store_true');parser.add_argument('--controller-dir',type=Path,default=ROOT.parent/'tooling/runpod-browser');args=parser.parse_args()
  output=ROOT/'build';output.mkdir(exist_ok=True)
  # Keep historical success, but never leave it labelled as the current attempt.
  started=time.time()
@@ -39,7 +40,7 @@ def run():
  sys.path.insert(0,str(args.controller_dir));from client import Browser
  remote=Browser();health=remote.request('/health');assert health['ready'],'Controller not ready'
  guest=Remote(remote)
- token=json.loads((Path.home()/'.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
+ token=read_invite(args.invite_stdin)
  stage='startup';host=None
  with tempfile.TemporaryDirectory(prefix='ember-cross-network-') as profile,(output/'cross-network-browser.log').open('w') as log:
   process=subprocess.Popen(['chromium','--ozone-platform=x11','--mute-audio','--no-first-run','--no-default-browser-check','--disable-background-timer-throttling','--disable-renderer-backgrounding','--remote-debugging-port=0','--remote-allow-origins=*',f'--user-data-dir={profile}','about:blank'],stdout=log,stderr=log)
@@ -54,12 +55,11 @@ def run():
    for page in [host,guest]:
     wait_until(lambda:page.evaluate('globalThis.EmberCoreWeb?.diagnostics().calls>120'),90)
     page.evaluate(COPY_CAPTURE)
-    page.click(160,283);enter_code(page,token)
-    page.click(180,317);page.click(160,378);page.click(160,354)
-   stage='host invitation';print('BOTH BROWSERS CONFIGURED',flush=True);host.click(160,387)
+    enter_invite(page,token);settings_route(page,1,manual=True)
+   stage='host invitation';print('BOTH BROWSERS CONFIGURED',flush=True);host.click(180,296)
    wait_until(lambda:host.evaluate('testPeers.at(-1)?.iceGatheringState==="complete"'),30)
    host.click(90,185);offer=host.evaluate('testCopied');assert len(offer)>100
-   stage='guest reply';print('HOST INVITATION READY',flush=True);guest.click(160,421);guest.click(240,185);enter(guest,offer)
+   stage='guest reply';print('HOST INVITATION READY',flush=True);guest.click(180,344);guest.click(240,185);enter(guest,offer)
    wait_until(lambda:guest.evaluate('testPeers.at(-1)?.iceGatheringState==="complete"'),30)
    guest.click(90,185);answer=wait_until(lambda:guest.evaluate('testCopied'),5);assert len(answer)>100 and answer!=offer
    stage='connect';print('GUEST REPLY READY',flush=True);host.click(240,185);enter(host,answer)

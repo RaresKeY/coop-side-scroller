@@ -62,7 +62,7 @@ func report() -> String:
  return JSON.stringify({"version":1,"build":BUILD,"attempt":id,"context":context,"events":events})
 
 func flush():
- if batches >= 240 or busy or id.is_empty() or sent >= sequence or game.relay_access.text.strip_edges().is_empty(): return
+ if batches >= 240 or busy or id.is_empty() or sent >= sequence or game.invite_key().is_empty(): return
  busy = true
  batches += 1
  var attempt = id
@@ -92,7 +92,7 @@ func flush():
   return
  var payload = {"version":1,"build":"diagnostics-v2" if legacy_upload else BUILD,"attempt":id,"events":upload_events}
  if not legacy_upload: payload.context = context
- var error = request.request(ENDPOINT,["Authorization: Bearer "+game.relay_access.text.strip_edges(),"Content-Type: application/json"],HTTPClient.METHOD_POST,JSON.stringify(payload))
+ var error = request.request(ENDPOINT,["Authorization: Bearer "+game.invite_key(),"Content-Type: application/json"],HTTPClient.METHOD_POST,JSON.stringify(payload))
  var retry_legacy := false
  if error == OK:
   var response = await request.request_completed
@@ -107,8 +107,8 @@ func flush():
  if retry_legacy: flush()
 
 func copy_report():
+ if id.is_empty(): begin()
  capture_ice()
- if id.is_empty(): return
  if OS.has_feature("web"):
   var helper = JavaScriptBridge.get_interface("EmberClipboard")
   if helper != null:

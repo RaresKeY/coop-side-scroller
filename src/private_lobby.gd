@@ -101,7 +101,7 @@ func request_data(data: Dictionary, request_generation: int) -> Dictionary:
  data.version = 1
  data.retryCapable = true
  if game.diagnostics != null: data.diagnostic = game.diagnostics.id
- var error = request.request(ENDPOINT,["Authorization: Bearer "+game.relay_access.text.strip_edges(),"Content-Type: application/json"],HTTPClient.METHOD_POST,JSON.stringify(data))
+ var error = request.request(ENDPOINT,["Authorization: Bearer "+game.invite_key(),"Content-Type: application/json"],HTTPClient.METHOD_POST,JSON.stringify(data))
  if error != OK:
   request.queue_free()
   return {"error":"Network unavailable"}
@@ -136,11 +136,9 @@ func service_error(status: int, code) -> String:
 
 func open():
  game.solo()
- var code = game.relay_access.text.strip_edges()
+ var code = game.invite_key()
  if code.length()<32 or code.length()>128:
-  game.setup_menu.show()
-  game.status.text = "Enter your private playtest access code first"
-  game.relay_access.grab_focus()
+  game.invite.open("Enter your invite key.")
   return
  game.diagnostics.begin()
  active = true
@@ -277,7 +275,7 @@ func retry_compatibility(source: String) -> bool:
  next_poll = 0
  game.setup_menu.hide()
  game.signal_panel.hide()
- panel.show()
+ panel.visible = not game.settings_menu.visible
  hint.text = "Switching both players to Compatibility (TLS 443)…"
  return true
 
@@ -293,7 +291,7 @@ func restart_compatibility(attempt: int):
  game.mode = "solo"
  game.core.configure(1)
  game.sync_core_view()
- if not game.setup_menu.visible: panel.show()
+ if not game.setup_menu.visible and not game.settings_menu.visible: panel.show()
  game.pairing_role = role
  hint.text = "Retrying both players with Compatibility (TLS 443)…"
  busy = true

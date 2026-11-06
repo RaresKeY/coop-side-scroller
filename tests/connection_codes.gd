@@ -240,7 +240,7 @@ func scene_checks():
  fake_lobby.response = {"version":1,"players":2,"signal":""}
  fake_lobby.sync_room();fake_lobby.complete_request.emit()
  check(scene.offers==1,"Joined partner did not trigger fresh host offer")
- scene.relay_access.text = "a".repeat(32) # Valid-shaped fixture invitation, no service call.
+ scene.invite.key = "a".repeat(32) # Valid-shaped fixture invitation, no service call.
  # Definitive expiry immediately restores the directory, without a stale retry.
  fake_lobby.response = {"error":"Closed","status":404,"code":"room_expired"}
  fake_lobby.sync_room();fake_lobby.complete_request.emit()

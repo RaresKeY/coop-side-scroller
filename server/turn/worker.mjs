@@ -3,6 +3,18 @@ const ORIGINS = new Set(['https://rareskey.github.io','http://127.0.0.1:27841','
 export const TTL = 3600;
 const URL_PATTERN = /^(stun|turn|turns):(?:stun|turn)\.cloudflare\.com:(?:3478|5349|443|80)(?:\?transport=(?:udp|tcp))?$/;
 const encoder = new TextEncoder();
+// Invitations are random 256-bit capabilities, not human-chosen passwords.
+// Persist only this verifier; presenting the stored digest must not authenticate.
+export async function inviteVerifier(value) {
+ const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(value)));
+ return [...bytes].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+async function inviteMatches(value, verifier) {
+ const actual = await inviteVerifier(value);
+ let difference = 0;
+ for (let i=0;i<64;i++) difference |= actual.charCodeAt(i)^verifier.charCodeAt(i);
+ return difference === 0;
+}
 async function equalSecret(a, b) {
  const [x,y] = await Promise.all([a,b].map(s => crypto.subtle.digest('SHA-256',encoder.encode(s))));
  const one=new Uint8Array(x),two=new Uint8Array(y);let difference=0;
@@ -53,7 +65,7 @@ async function handleRequest(request,env,fetcher=(url,options)=>fetch(url,option
   return new Response(null,{status:204,headers:{...headers,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':(lobby||diagnostic)?'Authorization, Content-Type':'Authorization','Access-Control-Max-Age':'600'}});
  }
  if(request.method!=='POST')return reply(405,'method_denied');
- if(!env.TURN_KEY_ID || !env.TURN_KEY_TOKEN || !env.PLAYTEST_TOKEN || !env.ISSUE_LIMIT || !env.TOTAL_LIMIT)return reply(503,'issuer_not_configured');
+ if(!env.TURN_KEY_ID || !env.TURN_KEY_TOKEN || typeof env.PLAYTEST_TOKEN_SHA256!=='string' || !/^[a-f0-9]{64}$/.test(env.PLAYTEST_TOKEN_SHA256) || env.PLAYTEST_TOKEN || !env.ISSUE_LIMIT || !env.TOTAL_LIMIT)return reply(503,'issuer_not_configured');
  // Per-IP limits mitigate unauthenticated attempts; shared invitation limit bounds use.
  try {
   const limiter=diagnostic?env.DIAGNOSTIC_LIMIT:lobby?env.LOBBY_LIMIT:env.ISSUE_LIMIT;
@@ -61,8 +73,9 @@ async function handleRequest(request,env,fetcher=(url,options)=>fetch(url,option
   if(!(await limiter.limit({key:`ip:${request.headers.get('CF-Connecting-IP')||'unknown'}`})).success)return reply(429,'rate_limited');
  } catch {return reply(503,'limiter_unavailable');}
  const authorization=request.headers.get('Authorization')||'';
+ if(authorization.length>512 || !authorization.startsWith('Bearer '))return reply(401,'access_denied');
  const operator=diagnostic && env.DIAGNOSTIC_READ_TOKEN && await equalSecret(authorization.slice(7),env.DIAGNOSTIC_READ_TOKEN);
- if(authorization.length>512 || !authorization.startsWith('Bearer ') || (!operator && !await equalSecret(authorization.slice(7),env.PLAYTEST_TOKEN)))return reply(401,'access_denied');
+ if(!operator && !await inviteMatches(authorization.slice(7),env.PLAYTEST_TOKEN_SHA256))return reply(401,'access_denied');
  const now=Math.floor(Date.now()/1000);
  if(!Number.isSafeInteger(Number(env.INVITE_EXPIRES_AT)) || now>=Number(env.INVITE_EXPIRES_AT))return reply(403,'invitation_expired');
  if(diagnostic) {

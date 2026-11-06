@@ -1,10 +1,11 @@
-import {handle,PrivateLobbies} from './worker.mjs';
+import {handle,inviteVerifier,PrivateLobbies} from './worker.mjs';
+const invitationHash = await inviteVerifier("test-private");
 const check=(value,message='assertion failed')=>{if(!value)throw new Error(message);};
 function fixture() {
  const store=new Map();let alarm=null,queue=Promise.resolve();
  const state={storage:{get:async k=>structuredClone(store.get(k)),list:async({prefix,limit})=>new Map([...store].filter(([k])=>k.startsWith(prefix)).slice(0,limit).map(([k,v])=>[k,structuredClone(v)])),put:async(k,v)=>{const entries=typeof k==='string'?{[k]:v}:k;for(const [key,value] of Object.entries(entries)){check(new TextEncoder().encode(JSON.stringify(value)).length<2000000,'SQLite value limit exceeded');store.set(key,structuredClone(value));}},delete:async k=>store.delete(k),setAlarm:async t=>{alarm=t;},deleteAlarm:async()=>{alarm=null;}},blockConcurrencyWhile:fn=>{const next=queue.then(fn);queue=next.catch(()=>{});return next;}};
  const object=new PrivateLobbies(state);
- const env={TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master',PLAYTEST_TOKEN:'test-private',INVITE_EXPIRES_AT:String(Date.now()/1000+600|0),ISSUE_LIMIT:{limit:()=>({success:true})},TOTAL_LIMIT:{limit:()=>({success:true})},LOBBY_LIMIT:{limit:()=>({success:true})},LOBBY_TOTAL:{limit:()=>({success:true})},LOBBIES:{idFromName:x=>x,get:()=>object}};
+ const env={TURN_KEY_ID:'key',TURN_KEY_TOKEN:'master',PLAYTEST_TOKEN_SHA256:invitationHash,INVITE_EXPIRES_AT:String(Date.now()/1000+600|0),ISSUE_LIMIT:{limit:()=>({success:true})},TOTAL_LIMIT:{limit:()=>({success:true})},LOBBY_LIMIT:{limit:()=>({success:true})},LOBBY_TOTAL:{limit:()=>({success:true})},LOBBIES:{idFromName:x=>x,get:()=>object}};
  const call=async(data,extra={})=>{const r=await handle(new Request('https://issuer.example/v1/lobby',{method:'POST',headers:{Origin:'https://rareskey.github.io',Authorization:'Bearer test-private',...extra},body:JSON.stringify({version:1,...data})}),env);return [r.status,await r.json()];};
  return {call,object,store,env,alarm:()=>alarm};
 }

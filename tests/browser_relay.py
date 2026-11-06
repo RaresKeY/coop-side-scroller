@@ -6,6 +6,7 @@ This same-machine test proves relay use, not independent access networks.
 import argparse,functools,http.server,json,signal,subprocess,tempfile,threading,time,urllib.request
 from pathlib import Path
 from browser_cdp import CDP,QuietHandler
+from browser_ui import enter_invite,settings_route,read_invite
 ROOT=Path(__file__).resolve().parents[1]
 signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(SystemExit(143)))
 INSTRUMENT='''globalThis.testPeers=[];globalThis.testHttp=[];globalThis.testDiagnosticHttp=[];globalThis.testDiagnosticEvents=[];globalThis.testDiagnosticReports=[];globalThis.EmberDiagnosticTest='browser';const nativeFetch=globalThis.fetch;globalThis.fetch=async(...args)=>{const r=await nativeFetch(...args);if(String(args[0]).includes('workers.dev'))testHttp.push(r.status);if(r.url.endsWith('/v1/diagnostics')){testDiagnosticHttp.push(r.status);try{const b=args[1]?.body;const text=typeof b==='string'?b:new TextDecoder().decode(b);const report=JSON.parse(text);testDiagnosticEvents.push(...report.events.map(e=>e.event));testDiagnosticReports.push({build:report.build,attempt:report.attempt,context:report.context,status:r.status,error:r.ok?null:(await r.clone().json()).error});}catch{}}if(r.url.endsWith('/v1/lobby')&&r.ok){const d=await r.clone().json();if(d.rooms)globalThis.testRoomList=d.rooms;if(d.id)globalThis.testRoomId=d.id;if(d.complete)globalThis.testRoomComplete=true;}return r;};const NativeRTC=globalThis.RTCPeerConnection;
@@ -31,8 +32,8 @@ def enter_code(page,text):
  page.call('Input.insertText',{'text':text})
  bounds=page.evaluate("(()=>{const r=document.querySelector('[data-ember-accept]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
  page.click(bounds['x'],bounds['y'])
-def run(lobby=False, url=None):
- token=json.loads((Path.home()/'.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
+def run(lobby=False, url=None, invite_stdin=False):
+ token=read_invite(invite_stdin)
  server=http.server.ThreadingHTTPServer(('127.0.0.1',27841),functools.partial(QuietHandler,directory=str(ROOT/'build/web')))
  threading.Thread(target=server.serve_forever,daemon=True).start();origin=url or 'http://127.0.0.1:27841'
  with tempfile.TemporaryDirectory(prefix='ember-relay-') as profile,(ROOT/'build/relay-browser.log').open('w') as log:
@@ -49,13 +50,12 @@ def run(lobby=False, url=None):
     page.call('Runtime.enable');page.call('Page.enable');page.call('Page.addScriptToEvaluateOnNewDocument',{'source':INSTRUMENT})
     page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
     page.call('Page.navigate',{'url':origin});wait_until(lambda:page.evaluate('globalThis.EmberCoreWeb?.diagnostics().calls>100'))
-    control.call('Target.activateTarget',{'targetId':target});time.sleep(.2);page.click(160,283);enter_code(page,token);page.click(180,317)
-    page.click(160,378) # Second popup item: Relay only.
-    if not lobby: page.click(160,354) # Advanced manual pairing.
+    control.call('Target.activateTarget',{'targetId':target});time.sleep(.2);enter_invite(page,token)
+    settings_route(page,1,manual=not lobby)
     pages.append((target,page));print('SETUP',role,flush=True)
    host,guest=[item[1] for item in pages]
    if lobby:
-    control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(160,216)
+    control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(160,241)
     wait_until(lambda:host.evaluate('testHttp.includes(200)'),12)
     time.sleep(.3);host.capture(ROOT/'build/lobby-directory.png')
     host.click(160,170)
@@ -64,7 +64,7 @@ def run(lobby=False, url=None):
     host.click(160,240) # Create room.
     wait_until(lambda:host.evaluate('!!globalThis.testRoomId'),15)
     host.capture(ROOT/'build/lobby-waiting.png')
-    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,216)
+    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,241)
     wait_until(lambda:guest.evaluate('testHttp.includes(200)'),12)
     guest.click(160,210);enter_code(guest,'Rae')
     room_id=wait_until(lambda:host.evaluate('globalThis.testRoomId'),5)
@@ -82,7 +82,7 @@ def run(lobby=False, url=None):
     wait_until(lambda:all(page.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay' for page in [host,guest]),30)
     print('LOBBY AUTOMATIC SIGNALING',flush=True)
    else:
-    control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(160,387)
+    control.call('Target.activateTarget',{'targetId':pages[0][0]});host.click(180,296)
     wait_until(lambda:host.evaluate('testPeers.length'),15)
     wait_until(lambda:host.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
     assert host.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay','Relay-only UI selection failed'
@@ -95,7 +95,7 @@ def run(lobby=False, url=None):
     # Godot's actual Copy/Paste buttons exchange its versioned codes in memory.
     host.click(90,185);time.sleep(.2)
     offer=host.evaluate('navigator.clipboard.readText()');assert len(offer)>100,'No offer copied'
-    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(160,421)
+    control.call('Target.activateTarget',{'targetId':pages[1][0]});guest.click(180,344)
     guest.click(240,185);enter_code(guest,offer)
     wait_until(lambda:guest.evaluate('testPeers.length && testPeers.at(-1).iceGatheringState==="complete"'))
     guest.click(90,185);time.sleep(.2);answer=guest.evaluate('navigator.clipboard.readText()');assert answer!=offer and len(answer)>100,'No answer copied'
@@ -148,4 +148,4 @@ def run(lobby=False, url=None):
    except subprocess.TimeoutExpired:browser.kill();browser.wait()
    server.shutdown();server.server_close()
 if __name__=='__main__':
- parser=argparse.ArgumentParser();parser.add_argument('--lobby',action='store_true');parser.add_argument('--url');args=parser.parse_args();run(args.lobby,args.url)
+ parser=argparse.ArgumentParser();parser.add_argument('--lobby',action='store_true');parser.add_argument('--url');parser.add_argument('--invite-stdin',action='store_true');args=parser.parse_args();run(args.lobby,args.url,args.invite_stdin)

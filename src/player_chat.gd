@@ -27,6 +27,7 @@ var last_send_ms := -100000
 var last_guest_ms := -100000
 var guest_budget := 8.0
 var observer
+var observed_available := false
 var browser_composer
 var composer_callback
 var composer_rect := Rect2()
@@ -120,6 +121,7 @@ func setup(owner_game, canvas):
  publish_observation()
 
 func available() -> bool:
+ if game.has_method("ui_blocking"): return not game.ui_blocking()
  return not game.setup_menu.visible and not game.signal_panel.visible and not (game.lobby != null and game.lobby.panel.visible)
 
 func _input(event):
@@ -367,6 +369,7 @@ func update_positions():
   panel.visible = visible_now
   if composing and not visible_now: finish_composing()
   publish_observation()
+ if observed_available != visible_now: publish_observation()
  # Reliable chat may precede the gameplay snapshot that creates its speaker.
  # Keep pending speech hidden until that actor is rendered, bounded by expiry.
  for slot in bubbles.keys():
@@ -431,5 +434,6 @@ func update_positions():
 func _process(_dt): update_positions()
 
 func publish_observation():
+ observed_available = available()
  if observer != null:
   observer.publish(JSON.stringify({"localSlot":local_slot(),"names":[display_name(1),display_name(2)],"messages":history,"composing":composing,"available":available()}))

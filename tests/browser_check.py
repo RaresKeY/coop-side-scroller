@@ -5,14 +5,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 ROOT=Path(__file__).resolve().parents[1]
 from browser_cdp import CDP, QuietHandler
-parser=argparse.ArgumentParser();parser.add_argument('--url');parser.add_argument('--ice-diagnostics-check',action='store_true');parser.add_argument('--connection-setup',action='store_true');parser.add_argument('--animation-check',action='store_true');parser.add_argument('--clipboard-check',action='store_true');args=parser.parse_args()
+from browser_ui import LOCAL_INVITE_KEY,LOCAL_INVITE_STUB,enter_invite,read_invite,settings_route
+parser=argparse.ArgumentParser();parser.add_argument('--url');parser.add_argument('--software-headless',action='store_true');parser.add_argument('--invite-stdin',action='store_true');parser.add_argument('--ice-diagnostics-check',action='store_true');parser.add_argument('--connection-setup',action='store_true');parser.add_argument('--animation-check',action='store_true');parser.add_argument('--clipboard-check',action='store_true');args=parser.parse_args()
 signal.signal(signal.SIGTERM,lambda *_:(_ for _ in ()).throw(SystemExit(143)))
 (ROOT/'build').mkdir(exist_ok=True)
 server=http.server.ThreadingHTTPServer(('127.0.0.1',27841 if args.ice_diagnostics_check else 0),functools.partial(QuietHandler,directory=str(ROOT/'build/web')))
 threading.Thread(target=server.serve_forever,daemon=True).start()
 origin=args.url or f'http://127.0.0.1:{server.server_port}'
 with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'build/browser-console.log').open('w') as log:
- browser=subprocess.Popen(['chromium','--ozone-platform=x11','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--remote-allow-origins=*',f'--user-data-dir={profile}','about:blank'],stdout=log,stderr=log)
+ browser=subprocess.Popen(['chromium',*(['--headless=new','--ozone-platform=headless','--use-angle=swiftshader','--enable-unsafe-swiftshader'] if args.software_headless else ['--ozone-platform=x11']),*(['--proxy-server='+os.environ['HTTPS_PROXY']] if os.environ.get('HTTPS_PROXY') else []),'--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--remote-allow-origins=*',f'--user-data-dir={profile}','about:blank'],stdout=log,stderr=log)
  try:
   port_file=Path(profile)/'DevToolsActivePort'
   for _ in range(100):
@@ -24,7 +25,9 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
   tabs=json.load(urllib.request.urlopen(base+'/json/list'))
   page=CDP(next(t for t in tabs if t['id']==target)['webSocketDebuggerUrl'])
   page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
-  page.call('Runtime.enable');page.call('Page.navigate',{'url':origin})
+  page.call('Runtime.enable');page.call('Page.enable')
+  if not args.url:page.call('Page.addScriptToEvaluateOnNewDocument',{'source':LOCAL_INVITE_STUB})
+  page.call('Page.navigate',{'url':origin})
   ready=None
   for _ in range(100):
    ready=page.evaluate('globalThis.EmberCoreWeb?.diagnostics()')
@@ -32,6 +35,8 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
    time.sleep(.15)
   assert ready and ready['live']==1 and ready['views'][0]['tick']>0,ready
   page.capture(ROOT/'build/web-onboarding.png')
+  invite=read_invite(args.invite_stdin) if args.url or args.ice_diagnostics_check else LOCAL_INVITE_KEY
+  enter_invite(page,invite)
   assert page.evaluate("""(()=>{const h=EmberCoreWeb.create();try{return [NaN,Infinity,-Infinity,0.5,4294967298,'2',null].every(op=>EmberCoreWeb.command(h,op,0,0)===-2)&&EmberCoreWeb.command(h,1,4294967296,0)===-2&&EmberCoreWeb.command(h,1,0,4294967296)===-2&&EmberCoreWeb.command(h,10,0,0)===0&&EmberCoreWeb.command(0,2,0,0)===-1;}finally{EmberCoreWeb.destroy(h)}})()"""),'Web ABI silently narrowed invalid arguments'
 
   if args.ice_diagnostics_check:
@@ -48,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
    assert 'ice-diagnostics.invalid' not in json.dumps(events),'Private server address leaked'
    assert all(not any(k in e for k in ['url','address','errorText','port']) for e in events),'Private ICE metadata leaked'
    diagnostic_id=__import__('secrets').token_hex(8)
-   token=json.loads((Path.home()/'.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
+   token=invite
    events.append({'event':'failure','reason':'gathering'})
    report={'version':1,'build':'diagnostics-v2','attempt':diagnostic_id,'events':[dict(e,seq=i+1,ms=i,role='client') for i,e in enumerate(events[-64:])]}
    status=page.evaluate("(async()=>{const r=await fetch('https://ember-coop-credentials.ember-bridge-playtests.workers.dev/v1/diagnostics',{method:'POST',headers:{'Authorization':'Bearer '+"+json.dumps(token)+",'Content-Type':'application/json'},body:"+json.dumps(json.dumps(report))+"});return r.status})()")
@@ -100,19 +105,6 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
    page.evaluate("globalThis.pasteResult=null;EmberClipboard.paste('Cancel probe',value=>pasteResult=value);EmberClipboard.cancel();true")
    assert page.evaluate("pasteResult==='' && !document.querySelector('[role=dialog]')"),'Cancelled paste retained'
    page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
-   page.click(160,283)
-   time.sleep(.15)
-   assert page.evaluate("document.activeElement===document.querySelector('input[data-ember-paste][type=password]')"),'Access key did not open masked native entry'
-   page.capture(ROOT/'build/access-key-entry.png')
-   page.call('Input.insertText',{'text':'public-access-probe'})
-   page.evaluate("globalThis.detachedEntry=document.querySelector('[data-ember-paste]');true")
-   page.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'Enter','code':'Enter','windowsVirtualKeyCode':13})
-   page.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'Enter','code':'Enter','windowsVirtualKeyCode':13})
-   assert page.evaluate("!document.querySelector('[role=dialog]') && detachedEntry.value===''")
-   page.click(160,283)
-   time.sleep(.15)
-   assert page.evaluate("document.querySelector('[data-ember-paste]').value==='public-access-probe'"),'Native entry did not update Godot key'
-   page.evaluate('EmberClipboard.cancel();true')
    page.evaluate("globalThis.roomResult=null;EmberClipboard.paste('Room name',value=>roomResult=value,'Co-op room',32,false);true")
    assert page.evaluate("document.activeElement.type==='text' && document.activeElement.maxLength===32 && document.activeElement.selectionEnd===10")
    page.call('Input.insertText',{'text':'Pasted room'})
@@ -123,7 +115,7 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
    page.call('Emulation.setDeviceMetricsOverride',{'width':960,'height':540,'deviceScaleFactor':1,'mobile':False})
    print('BROWSER CLIPBOARD FALLBACK PASS: 1920,1280,960,854; real copy, focus, cancel and cleanup')
 
-  page.click(110,177) # Actual Play solo menu button.
+  page.click(180,193) # Actual Play solo menu button.
   time.sleep(.25)
   before=page.evaluate('EmberCoreWeb.diagnostics()')['views'][0]
   page.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'d','code':'KeyD','windowsVirtualKeyCode':68})
@@ -156,10 +148,8 @@ with tempfile.TemporaryDirectory(prefix='ember-web-check-') as profile, (ROOT/'b
    assert contact['hp']<pose['hp'],contact
    print('GODOT WEB ANIMATION/COMBAT PASS',contact)
   if args.connection_setup:
-   page.click(55,70) # Open Menu, then Host game.
-   time.sleep(.15)
-   page.click(110,354) # Reveal manual connection controls.
-   page.click(110,387)
+   settings_route(page,2,manual=True)
+   page.click(180,296) # Advanced Host in Settings.
    time.sleep(2)
    page.capture(ROOT/'build/web-connection.png')
    # Inspect this capture for setup/failure UI; this does not assert P2P success.

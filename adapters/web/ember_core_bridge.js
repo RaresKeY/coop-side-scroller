@@ -375,3 +375,67 @@ globalThis.EmberClipboard = (() => {
   });
   globalThis.addEventListener?.('resize', place);
 })();
+
+// Password-manager compatible invite entry; no game-owned credential persistence.
+(() => {
+  let form = null, field = null, finish = null, bounds = null, observer = null, pending = false;
+  const place = () => {
+    if (!field || !bounds) return;
+    const rect = document.querySelector('canvas')?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    const [x,y,w,h,vw,vh] = bounds;
+    Object.assign(form.style, {left:`${rect.left+x*rect.width/vw}px`,top:`${rect.top+y*rect.height/vh}px`,
+      width:`${w*rect.width/vw}px`,height:`${h*rect.height/vh}px`});
+    field.style.fontSize = `${16*rect.height/vh}px`;
+    form.style.visibility = 'visible';
+    if (!field.dataset.placed) {field.dataset.placed='true';field.focus();}
+  };
+  const submit = () => {
+    if (!field || pending || !field.value.trim()) return;
+    finish?.('submit',field.value.trim());
+  };
+  globalThis.EmberInviteField = Object.freeze({
+    open(callback,limit) {
+      if (form || typeof callback !== 'function' || limit !== 128) return;
+      finish = callback;
+      form = document.createElement('form');
+      form.method = 'post';form.autocomplete = 'on';form.setAttribute('aria-label','Playtest invite');
+      form.style.cssText='position:fixed;z-index:9500;margin:0;visibility:hidden;';
+      const ownedForm = form;
+      form.onsubmit = event => {event.preventDefault();event.stopPropagation();if(form===ownedForm)submit();};
+      field = document.createElement('input');
+      field.type='password';field.name='invite_key';field.id='ember-invite-key';
+      field.autocomplete='current-password';field.maxLength=limit;
+      field.setAttribute('aria-label','Invite key');field.setAttribute('autocapitalize','off');
+      field.spellcheck=false;field.placeholder='Invite key';field.dataset.emberInvite='';
+      field.style.cssText='box-sizing:border-box;width:100%;height:100%;font-family:sans-serif;color:#eee;background:#171719;border:1px solid #8d7961;border-radius:2px;padding:6px 10px;';
+      const ownedField = field;
+      field.onkeydown = event => {
+        event.stopPropagation();
+        if (field!==ownedField || event.isComposing) return;
+        if (event.key==='Enter') {event.preventDefault();submit();}
+        if (event.key==='Escape') event.preventDefault();
+        if (event.key==='Tab') {event.preventDefault();finish?.('focus','');}
+      };
+      form.append(field);document.body.append(form);
+      const canvas=document.querySelector('canvas');
+      if (canvas && typeof ResizeObserver==='function') {observer=new ResizeObserver(place);observer.observe(canvas);}
+      place();
+    },
+    place(x,y,w,h,vw,vh) {
+      if (![x,y,w,h,vw,vh].every(Number.isFinite)||w<=0||h<=0||vw<=0||vh<=0) return;
+      bounds=[x,y,w,h,vw,vh];place();
+    },
+    submit,
+    setBusy(value) {pending=!!value;if(field){field.disabled=pending;if(!pending)field.focus();}},
+    focus() {field?.focus();},
+    blur() {field?.blur();document.querySelector('canvas')?.focus();},
+    close() {
+      observer?.disconnect();observer=null;
+      if(field) {field.value='';field.remove();field=null;}
+      form?.remove();form=null;finish=null;bounds=null;pending=false;
+      document.querySelector('canvas')?.focus();
+    },
+  });
+  globalThis.addEventListener?.('resize',place);
+})();
