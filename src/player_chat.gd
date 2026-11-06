@@ -314,6 +314,7 @@ func append_message(id: int, slot: int, author: String, text: String):
  else: scroll.set_deferred("value",saved)
  if bubbles.has(slot): bubbles[slot].node.queue_free()
  var bubble = SpeechBubble.new()
+ bubble.hide()
  bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
  bubble.z_index = 20
  bubble.configure(plate(0.68))
@@ -338,6 +339,13 @@ func update_positions():
   panel.visible = visible_now
   if composing and not visible_now: finish_composing()
   publish_observation()
+ # Reliable chat may precede the gameplay snapshot that creates its speaker.
+ # Keep pending speech hidden until that actor is rendered, bounded by expiry.
+ for slot in bubbles.keys():
+  if now_ms()>=bubbles[slot].until:
+   bubbles[slot].node.queue_free()
+   bubbles.erase(slot)
+  elif not game.sprites.has(slot): bubbles[slot].node.hide()
  for slot in tags.keys():
   if not game.sprites.has(slot) or slot==local_slot(): tags[slot].queue_free(); tags.erase(slot)
  for slot in game.sprites:
@@ -363,10 +371,7 @@ func update_positions():
    var bubble = bubbles[slot].node
    bubble.reset_size()
    bubble.position = Vector2(clampf(feet.x-bubble.size.x/2,4,956-bubble.size.x),clampf(feet.y-102-bubble.size.y,4,maxf(4,536-bubble.size.y-SpeechBubble.TAIL_LENGTH)))
- for slot in bubbles.keys():
-  if now_ms()>=bubbles[slot].until or not game.sprites.has(slot):
-   bubbles[slot].node.queue_free()
-   bubbles.erase(slot)
+   bubble.show()
 
  # Nearby players can speak at once. Prefer the smallest move above/alongside
  # the other plate, while keeping both messages inside the arena.
@@ -374,6 +379,7 @@ func update_positions():
  var slots = bubbles.keys()
  slots.sort()
  for slot in slots:
+  if not game.sprites.has(slot): continue
   var bubble = bubbles[slot].node
   var rect = bubble.footprint()
   for other in occupied:

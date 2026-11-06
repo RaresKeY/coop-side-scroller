@@ -303,7 +303,7 @@ globalThis.EmberClipboard = (() => {
 
 // Inline browser input keeps IME/paste native while Godot draws the RPG history.
 (() => {
-  let field = null, previous = null, bounds = null;
+  let field = null, previous = null, bounds = null, canvasObserver = null;
   const place = () => {
     if (!field || !bounds) return;
     const canvas = document.querySelector('canvas');
@@ -330,7 +330,15 @@ globalThis.EmberClipboard = (() => {
         if (event.key === 'Escape') { event.preventDefault(); finish('cancel', ''); }
       };
       // Key releases may still clear keys held before the composer opened.
-      document.body.append(field); place();
+      document.body.append(field);
+      // Godot can resize the canvas after the window resize event has fired.
+      // Observe its layout so a composing field follows that later change too.
+      const canvas = document.querySelector('canvas');
+      if (canvas && typeof ResizeObserver === 'function') {
+        canvasObserver = new ResizeObserver(place);
+        canvasObserver.observe(canvas);
+      }
+      place();
     },
     place(x, y, w, h, vw, vh) {
       if (![x,y,w,h,vw,vh].every(Number.isFinite) || w<=0 || h<=0 || vw<=0 || vh<=0) return;
@@ -338,6 +346,7 @@ globalThis.EmberClipboard = (() => {
     },
     focus() { field?.focus(); },
     close() {
+      canvasObserver?.disconnect(); canvasObserver = null;
       if (field) { field.value = ''; field.remove(); field = null; }
       bounds = null; previous?.focus(); previous = null;
     },

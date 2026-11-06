@@ -73,8 +73,21 @@ func run():
  hc.receive(37,{"v":1,"kind":"submit","session":hc.session,"id":5,"slot":1,"text":"spoof"})
  check(hc.history.size()==1 and gc.history.size()==1,"Replay, stale session or spoof accepted")
  check(not gc.submit("Too fast"),"Sender throttle missing")
+ # Reliable chat can arrive before the first gameplay snapshot creates actors.
+ var pending_speaker = guest.sprites[1]
+ guest.sprites.erase(1)
  hc.clock+=1000;gc.clock+=1000
  check(hc.submit("[b]I am moving right.[/b]"),"Host action description failed")
+ gc.update_positions()
+ check(gc.bubbles.has(1),"Speech arriving before the actor snapshot was discarded")
+ if gc.bubbles.has(1): check(not gc.bubbles[1].node.visible,"Pending speech flashed without its speaker")
+ guest.sprites[1] = pending_speaker
+ gc.update_positions()
+ check(gc.bubbles.has(1) and gc.bubbles[1].node.visible,"Pending speech did not follow its arriving speaker")
+ if not gc.bubbles.has(1):
+  host.free();guest.free()
+  quit(1)
+  return
  check(hc.log_view.get_parsed_text().contains("[b]I am moving right.[/b]"),"Player text was parsed as markup")
  check(gc.bubbles.has(1) and hc.bubbles.has(1),"Host speech missing from both views")
  await process_frame;await process_frame
@@ -109,11 +122,16 @@ func run():
  hc.clock+=1000;hc.submit("Keep reading older messages")
  await process_frame;await process_frame
  check(hc.log_view.get_v_scroll_bar().value<2,"Incoming chat stole scroll position")
+ guest.sprites.erase(1)
+ gc.update_positions()
+ check(gc.bubbles.has(1) and not gc.bubbles[1].node.visible,"Missing speaker did not hide pending speech")
+ var expired_pending = weakref(gc.bubbles[1].node)
  var expired_bubble = weakref(hc.bubbles[1].node)
  hc.clock+=11000;gc.clock+=11000;hc.update_positions();gc.update_positions()
  check(hc.bubbles.is_empty() and gc.bubbles.is_empty(),"Speech bubbles did not expire")
  await process_frame
  check(expired_bubble.get_ref()==null,"Expired speech retained its drawn tail")
+ check(expired_pending.get_ref()==null,"Pending speech outlived its expiration")
  gc.clear_session();hc.clear_session()
  check(gc.history.is_empty() and gc.names==["",""] and gc.session.is_empty() and gc.tags.is_empty(),"Session reset leaked identity/chat")
  host.free();guest.free()
