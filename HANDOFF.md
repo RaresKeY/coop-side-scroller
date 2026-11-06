@@ -1,11 +1,15 @@
 # Speech bubble tail milestone
 
-Updated 2026-11-06. Objective: dynamic bottom speech triangle, offset sideways and aimed at the speaking player; review/patch until clean.
+Updated 2026-11-06. Objective delivered: off-center bottom speech triangle dynamically aimed at the speaking player, with review/patch through verified release.
 
-Owner General x86 `/workspace/coop-side-scroller`, branch `work/network-review-20261106`. Preserve dirty workstation checkout and active Terra play session. No Runpod. Reuse prepared Godot4.7/native/Wasm tooling, direct native fallback (no nested Podman); headless software browser for checks because GPU is owned elsewhere.
+Owner General x86 `/workspace/coop-side-scroller`, branch `work/network-review-20261106`. Preserve dirty workstation checkout and active Terra session. No Runpod/new dependencies/Node/npm. Reuse prepared Godot4.7/native/Wasm tooling; direct native fallback and intentional headless software browser.
 
-Decision: adapter presentation only. New speech_bubble draws body/tail as one translucent outline, points toward rendered head after spacing, reserves24px tail footprint and clamps slanted tips to bubble width. Tail lifetime belongs to the bubble; no external nodes or networking change.
+Decisions: adapter-owned speech_bubble draws one continuous translucent body/tail, avoiding an opacity seam. Tip follows rendered head after spacing, with bounded24-unit length, horizontal/vertical bounds, and footprint reservation so tails do not cover neighboring text. Lifetime belongs to the bubble. Review also fixed directory reads swallowing Join/Create clicks: separate read busy/generation, retire old callbacks before membership and on close. Wire/RPC/core unchanged.
 
-State: implementation/review complete, ready for commit. Native chat/setup/presentation checks and actual Web standing/stacked/moving/jumping captures pass. Review also patched directory reads swallowing Join/Create clicks; independent read generation fences late callbacks. Earlier two browser join failures retained. Next clean export, audited source/Pages publication and hosted check (including deliberately held directory read during Join). Preserve active old-build Terra browser; adapter RPC/wire compatibility is unchanged, so no forced runtime replacement. Refresh final source/deployment/evidence after proof.
+State: source/game build8397e5aba94aa2a09b68550e0b6778def8a1ed10 pushed and live. Pages95dcd9f24e2744d39ad073b905cc817220cba35f completed; all hosted candidate hashes match. Secret audit and11 publication tests passed. Final metadata-only source update follows; no new game export needed.
 
-Evidence `.local/speech-tail-20261106/`; preceding chat evidence `.local/chat-20261106/` and external `.agent-handoffs/coop-live-20261106/chat/`. Existing Terra runtime details in external receipt; do not stop or recreate it without need/request.
+Verification: native chat geometry/lifecycle, connection/setup pending-read Join regression and12 snapshot checks pass. Actual local and hosted Web peers pass names/chat/echo/input isolation plus standing/stacked/moving/jumping tail captures. Hosted Join succeeds with a real directory response delayed4seconds, and runtime-console checks are clean. Four sizes inspected; short speech naturally expires during long capture matrix. Two pre-fix browser join failures retained. Hardware FPS/input-to-display latency, geographic-network behavior and device coverage are unmeasured; human visual/play acceptance remains.
+
+Evidence `.local/speech-tail-20261106/`; workstation `.agent-handoffs/coop-live-20261106/speech-tail/` and `hosted/`. External milestone and receipt carry actual private runtime/room ownership. Terra's existing control-only wait/follow/react/chat-until-stop goal/browser remains active on the previous compatible presentation build; no forced restart.
+
+Next: user reloads to see tails and reviews in play. Preserve Terra unless stopped or its bounded lifetime expires. Remove only generated Web candidates/publication staging after hosted proof; preserve native/Wasm prep, immutable private art and evidence.
