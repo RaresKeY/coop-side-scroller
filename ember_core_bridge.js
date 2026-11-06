@@ -276,3 +276,71 @@ globalThis.EmberClipboard = (() => {
     },
   });
 })();
+
+// Read-only client-side observations for the player controller and finite checks.
+// No chat transmission, DOM markup, persistent storage or diagnostic upload here.
+(() => {
+  let state = Object.freeze({localSlot: 1, names: Object.freeze([]), messages: Object.freeze([]), composing: false, available: false});
+  globalThis.EmberSocialObserver = Object.freeze({
+    publish(json) {
+      if (typeof json !== 'string' || json.length > 150000) return;
+      try {
+        const value = JSON.parse(json);
+        if (![1, 2].includes(value.localSlot) || !Array.isArray(value.names) || value.names.length !== 2 ||
+            value.names.some(name => typeof name !== 'string' || name.length > 96) ||
+            !Array.isArray(value.messages) || value.messages.length > 100 || typeof value.composing !== 'boolean' || typeof value.available !== 'boolean') return;
+        for (const message of value.messages) {
+          if (![1, 2].includes(message.slot) || !Number.isSafeInteger(message.id) || message.id < 1 ||
+              typeof message.name !== 'string' || message.name.length > 96 || typeof message.text !== 'string' || message.text.length > 800) return;
+          Object.freeze(message);
+        }
+        state = Object.freeze({...value, names: Object.freeze(value.names), messages: Object.freeze(value.messages)});
+      } catch { /* Incomplete observations never replace the last valid state. */ }
+    },
+    snapshot: () => state,
+  });
+})();
+
+// Inline browser input keeps IME/paste native while Godot draws the RPG history.
+(() => {
+  let field = null, previous = null, bounds = null;
+  const place = () => {
+    if (!field || !bounds) return;
+    const canvas = document.querySelector('canvas');
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const [x, y, w, h, vw, vh] = bounds;
+    Object.assign(field.style, {left: `${rect.left+x*rect.width/vw}px`, top: `${rect.top+y*rect.height/vh}px`,
+      width: `${w*rect.width/vw}px`, height: `${h*rect.height/vh}px`, fontSize: `${14*rect.height/vh}px`, visibility: 'visible'});
+    if (!field.dataset.placed) { field.dataset.placed = 'true'; field.focus(); }
+  };
+  globalThis.EmberChatComposer = Object.freeze({
+    open(finish, limit) {
+      if (field || typeof finish !== 'function' || limit !== 200) return;
+      previous = document.activeElement;
+      field = document.createElement('input');
+      field.type = 'text'; field.maxLength = limit; field.autocomplete = 'off';
+      field.setAttribute('aria-label', 'Chat message'); field.dataset.emberChat = '';
+      field.placeholder = 'Message…';
+      field.style.cssText = 'position:fixed;z-index:9000;visibility:hidden;box-sizing:border-box;color:#e6e6e6;background:#191b20;border:1px solid #777;border-radius:2px;padding:3px 6px;font-family:sans-serif;';
+      field.onkeydown = event => {
+        event.stopPropagation();
+        if (event.isComposing) return;
+        if (event.key === 'Enter') { event.preventDefault(); finish('send', field.value); }
+        if (event.key === 'Escape') { event.preventDefault(); finish('cancel', ''); }
+      };
+      // Key releases may still clear keys held before the composer opened.
+      document.body.append(field); place();
+    },
+    place(x, y, w, h, vw, vh) {
+      if (![x,y,w,h,vw,vh].every(Number.isFinite) || w<=0 || h<=0 || vw<=0 || vh<=0) return;
+      bounds = [x,y,w,h,vw,vh]; place();
+    },
+    focus() { field?.focus(); },
+    close() {
+      if (field) { field.value = ''; field.remove(); field = null; }
+      bounds = null; previous?.focus(); previous = null;
+    },
+  });
+  globalThis.addEventListener?.('resize', place);
+})();
