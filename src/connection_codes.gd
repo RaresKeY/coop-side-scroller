@@ -1,6 +1,6 @@
 extends RefCounted
 # This envelope versions the adapter handshake, independently of gameplay bytes.
-const VERSION := 1
+const VERSION := 2
 const PROTOCOL := 3
 const MAX_CODE := 65536
 

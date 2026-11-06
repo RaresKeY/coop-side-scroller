@@ -239,3 +239,13 @@ Deno.test('Actively renewed rooms allow a late join for one hour, then expire',a
   check((await f.call({action:'sync',id:room.id,seat:host}))[1].error==='room_expired');
  } finally {Date.now=original;}
 });
+
+Deno.test('Social adapter envelope v2 cannot pair with the older RPC layout',async()=>{
+ const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Chat'}))[1];
+ await f.call({action:'join',id:room.id,seat:guest});
+ const code=(type,version)=>btoa(JSON.stringify({...JSON.parse(atob(signal(type))),protocol:3,version}));
+ const sync=(seat,value)=>f.call({action:'sync',id:room.id,seat,signal:value});
+ check((await sync(host,code('offer',2)))[0]===200);
+ check((await sync(guest,code('answer',1)))[0]===409,'mixed RPC layouts accepted');
+ check((await sync(guest,code('answer',2)))[0]===200);
+});

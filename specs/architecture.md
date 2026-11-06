@@ -10,6 +10,7 @@ Ember Bridge is a two-player, host-authoritative co-op prototype built around an
 | `adapters/godot/` | Native C-interface GDExtension and GDScript facade | Calls the same core API on native and Web targets |
 | `adapters/web/ember_core_bridge.js` | Separate core Wasm boot/bridge and browser-native text/copy dialogs | Godot and core Wasm memories remain separate |
 | `src/main.gd`, `src/character_view.gd` | Fixed-tick scheduling, input capture, menus, rendering, sprite playback, transport and diagnostics | Supplies inputs/ticks, sends opaque messages, consumes core views/events |
+| `src/player_chat.gd` | Session player names, reliable chat, RPG HUD/name tags and speech plates | Adapter metadata; no simulation state or persistent service storage |
 | `src/diagnostics.gd` | Bounded browser connection events, best-effort uploads and copyable reports | Adapter-only; sanitized journal in existing Worker/DO |
 | `src/private_lobby.gd`, `src/relay_credentials.gd`, `src/connection_codes.gd` | HTTP setup, credential validation and versioned signaling envelopes | Connection metadata stays outside the core |
 | `server/turn/worker.mjs` | Playtest-key authorization, temporary ICE issuance, private room directory/signaling | `/v1/ice` and `/v1/lobby`; one SQLite Durable Object holds bounded setup records |
@@ -17,7 +18,7 @@ Ember Bridge is a two-player, host-authoritative co-op prototype built around an
 | GitHub Pages / Firebase Hosting | Static HTML, Godot engine/export, core Wasm and notices | No server execution or credentials embedded in the page |
 | `labs/` | Native worker lifecycle, two keyboard schemes, delay controls and telemetry | Separate processes/cores communicate through real ENet; controller sends no world state |
 
-The core does not own clocks, input devices, rendering, audio, assets, engine physics, HTTP or network transports. Its simple floor/arena rules are implemented in C++; integration with an engine collision scene is not supplied. The host is trusted. The shared playtest key controls service access, not host honesty or individual player identity.
+Player identity and [chat](player-chat.md) use a separate reliable adapter metadata stream. The core does not own names, chat, clocks, input devices, rendering, audio, assets, engine physics, HTTP or network transports. Its simple floor/arena rules are implemented in C++; integration with an engine collision scene is not supplied. The host is trusted. The shared playtest key controls service access, not host honesty or individual player identity.
 
 ## Session lifecycle
 

@@ -15,6 +15,7 @@ Start with [current architecture](architecture.md): portable C++ core, Godot nat
 | [Prototype](prototype.md) | `src/main.gd`, `project.godot`, `main.tscn` | Changing gameplay, menus, animation or transport |
 | [Local prediction](local-prediction.md) | `core/src/ember_core.cpp`, `src/main.gd`, prediction/identity tests | Changing immediate local feedback, ACK/replay bounds, tap retention or per-view identity |
 | [Snapshot presentation](snapshot-presentation.md) | `src/snapshot_interpolator.gd`, `src/main.gd`, snapshot tests | Changing remote interpolation, session reset or render/pose clocks |
+| [Player identity and chat](player-chat.md) | `src/player_chat.gd`, adapter RPC/text input and chat checks | Changing names, Enter-to-chat, sender echo, bubbles or Terra conversation controls |
 | [Character presentation](character-presentation.md) | `src/character_view.gd`, `shaders/`, animation captures/tests | Changing sprite size, anchors, atlas slicing, frame timing or sampling |
 | [Browser connection](browser-connection.md) | `src/connection_codes.gd`, WebRTC in `src/main.gd`, `adapters/web/ember_core_bridge.js`, `tests/connections.sh` | Changing browser pairing, TLS compatibility routing, validation, timeouts or assessing internet/NAT requirements |
 | [Connection diagnostics](diagnostics.md) | `src/diagnostics.gd`, Worker, Cloudflare operator | Recording and retrieving playtest failures, build identity, test markers, selected transport and traffic rates |

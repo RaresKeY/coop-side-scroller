@@ -38,6 +38,9 @@ var enemy_flash := 0.0
 var enemy_x := 720.0
 var sprites: Dictionary = {}
 var local_marker: Polygon2D
+var player_name := "Adventurer"
+var native_name: LineEdit
+var chat
 var sheet = preload("res://assets/knight.png")
 var animations: SpriteFrames
 var rtc: WebRTCPeerConnection
@@ -91,13 +94,14 @@ func _ready():
   if arg.begins_with("--bus-port="): bus_port = int(arg.get_slice("=",1))
   if arg.begins_with("--address="): requested_address = arg.get_slice("=",1)
   if arg.begins_with("--port="): port = int(arg.get_slice("=",1))
+  if arg.begins_with("--player-name="): player_name = arg.get_slice("=",1).left(24)
  if ResourceLoader.exists("res://assets/private/tiles/Tile_02.png"):
   ground_tile = load("res://assets/private/tiles/Tile_02.png")
  camera = Camera2D.new()
  camera.position = Vector2(480,270)
  add_child(camera)
  local_marker = Polygon2D.new()
- local_marker.polygon = PackedVector2Array([Vector2(-5,-7),Vector2(5,-7),Vector2.ZERO])
+ local_marker.polygon = PackedVector2Array([Vector2(-3,-6),Vector2(3,-6),Vector2(3,0),Vector2(-3,0)])
  local_marker.color = Color("f5d76c")
  local_marker.z_index = 10
  local_marker.hide()
@@ -145,6 +149,12 @@ func _ready():
  address.placeholder_text = "Host address"
  options.add_child(address)
  address.visible = not OS.has_feature("web")
+ native_name = LineEdit.new()
+ native_name.text = player_name
+ native_name.placeholder_text = "Your player name"
+ native_name.max_length = 24
+ native_name.visible = not OS.has_feature("web")
+ options.add_child(native_name)
  if OS.has_feature("web"):
   var rooms_button = Button.new()
   rooms_button.text = "Private rooms"
@@ -244,6 +254,12 @@ func _ready():
  lobby = preload("res://src/private_lobby.gd").new()
  add_child(lobby)
  lobby.setup(self,canvas)
+ chat = preload("res://src/player_chat.gd").new()
+ add_child(chat)
+ chat.setup(self,canvas)
+ chat.outgoing.connect(func(peer, packet):
+  if peer in multiplayer.get_peers(): social_packet.rpc_id(peer,packet)
+ )
  solo()
  setup_menu.visible = lab_role == ""
  if lab_role != "":
@@ -267,7 +283,7 @@ func _ready():
    join_game()
  multiplayer.peer_connected.connect(peer_joined)
  multiplayer.peer_disconnected.connect(peer_left)
- multiplayer.connected_to_server.connect(func(): signal_panel.hide(); status.text = "Connected • host simulates combat and movement"; connected_at = elapsed)
+ multiplayer.connected_to_server.connect(func(): signal_panel.hide(); status.text = "Connected • host simulates combat and movement"; connected_at = elapsed; chat.connected())
  multiplayer.connection_failed.connect(func(): network_ended("Connection failed · retry Private rooms" if OS.has_feature("web") else "Connection failed. Check address / UDP 27840.","multiplayer_connect_failed"))
  multiplayer.server_disconnected.connect(func(): network_ended("Host disconnected • returned to solo"))
 
@@ -593,6 +609,7 @@ func _process(_dt):
 
 func reset_network():
  snapshot_interpolator.reset()
+ if chat != null: chat.clear_session()
  if local_marker != null: local_marker.hide()
  connection_generation += 1
  if OS.has_feature("web"):
@@ -652,7 +669,19 @@ func solo():
  sync_core_view()
  status.text = "Solo"
 
+func profile_from_menu() -> bool:
+ if OS.has_feature("web"): return true
+ var chosen = preload("res://src/player_chat.gd").clean_text(native_name.text,24)
+ if chosen.is_empty():
+  setup_menu.show()
+  status.text = "Enter your player name (1–24 characters)"
+  native_name.grab_focus()
+  return false
+ player_name = chosen
+ return true
+
 func host():
+ if not profile_from_menu(): return
  if lobby != null: lobby.close()
  setup_menu.hide()
  if OS.has_feature("web"):
@@ -674,6 +703,7 @@ func host():
  status.text = "Host / UDP %d / waiting" % port
 
 func join_game():
+ if not profile_from_menu(): return
  if lobby != null: lobby.close()
  setup_menu.hide()
  if OS.has_feature("web"):
@@ -699,15 +729,24 @@ func peer_joined(id: int):
  if mode == "host":
   core.peer_active(true)
   sync_core_view()
+  chat.connected()
   test_partner_seen = true
   signal_panel.hide()
   status.text = "Partner joined • relay-only" if rtc != null and rtc_route_mode == 1 else "Partner joined • host authority • snapshots 20 Hz"
 
 func peer_left(_id: int):
  if mode == "host":
+  chat.peer_left()
   core.peer_active(false)
   sync_core_view()
   status.text = "Partner left • waiting for another"
+
+func social_peers() -> PackedInt32Array:
+ return multiplayer.get_peers()
+
+@rpc("any_peer", "call_remote", "reliable")
+func social_packet(packet: Dictionary):
+ chat.receive(multiplayer.get_remote_sender_id(),packet)
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
 func gameplay_message(bytes: PackedByteArray):
@@ -797,7 +836,7 @@ func _physics_process(dt):
   axis = control_input[0]
   jump = control_input[1]
   attack = control_input[2]
- var ui_open = typing or setup_menu.visible or signal_panel.visible or (lobby != null and lobby.panel.visible)
+ var ui_open = typing or (chat != null and chat.composing) or setup_menu.visible or signal_panel.visible or (lobby != null and lobby.panel.visible)
  if ui_open: axis = 0; jump = false; attack = false
  if test_mode == "client": axis = 1.0 if players.get(2,{}).get("x",0.0) < 680.0 else 0.0; jump = elapsed < 2 and fmod(elapsed,1.2)<0.15; attack = true
  if mode == "client" and rtc == null and multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED and elapsed-connected_at > (60 if OS.has_feature("web") else 8):

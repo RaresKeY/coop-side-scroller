@@ -40,7 +40,7 @@ Remaining integration work:
 
 ## Gameplay and portability
 
-- **Player chat (requested):** add multiplayer text chat with messages appearing in an RPG-style chat window and above the sending player's character on a transparent backplate.
+- Player names and RPG chat are implemented: Enter-to-chat, scrollable history and both-view speech plates; evaluate human readability/conversation pacing. See [chat](specs/player-chat.md).
 
 - Local guest prediction/reconciliation and remote-actor interpolation are implemented. Evaluate actual correction quality under loss and broader human latency acceptance. See [prediction bounds](specs/local-prediction.md) and [presentation bounds](specs/snapshot-presentation.md).
 - Evaluate reliable gameplay event IDs/acknowledgements, action-tick reconciliation and prolonged loss handling. Existing input/snapshot sequencing does not make events a reliable stream.

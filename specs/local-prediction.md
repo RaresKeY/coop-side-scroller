@@ -20,7 +20,7 @@ The adapter flushes newly emitted packets after the same core tick, removing the
 
 ## Identity
 
-Each view colors its own slot white (original art colors), the remote slot cyan. A gold downward triangle sits above the local character. Appearance and marker position update with perspective; reset hides the marker. Stable authority slots remain host=1 and guest=2.
+Each view colors its own slot white (original art colors), the remote slot cyan. A yellow square identifies the local character; remote names are described in [player identity and chat](player-chat.md). Appearance and marker position update with perspective; reset hides the marker. Stable authority slots remain host=1 and guest=2.
 
 ## Verification and limits
 

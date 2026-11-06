@@ -5,6 +5,8 @@ var game
 var panel: VBoxContainer
 var rows: VBoxContainer
 var room_name: LineEdit
+var player_name_input: LineEdit
+var player_name_row: HBoxContainer
 var hint: Label
 var create_button: Button
 var refresh_button: Button
@@ -45,6 +47,19 @@ func setup(owner_game, canvas):
  room_name.max_length = 32
  panel.add_child(room_name)
  game.bind_browser_entry(room_name,"Room name",32)
+ player_name_input = LineEdit.new()
+ player_name_input.placeholder_text = "Your name"
+ player_name_input.text = game.player_name
+ player_name_input.max_length = 24
+ player_name_row = HBoxContainer.new()
+ var name_label = Label.new()
+ name_label.text = "Name"
+ name_label.custom_minimum_size.x = 48
+ player_name_row.add_child(name_label)
+ player_name_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ player_name_row.add_child(player_name_input)
+ panel.add_child(player_name_row)
+ game.bind_browser_entry(player_name_input,"Your player name",24)
  create_button = Button.new()
  create_button.text = "Create room"
  create_button.custom_minimum_size.y = 36
@@ -127,6 +142,7 @@ func open():
  active = true
  panel.show()
  room_name.show()
+ player_name_row.show()
  create_button.show()
  refresh_button.show()
  room_name.grab_focus()
@@ -186,6 +202,12 @@ func enter_room(action: String, id: String = ""):
   hint.text = "Enter a room name first"
   room_name.grab_focus()
   return
+ var chosen_name = preload("res://src/player_chat.gd").clean_text(player_name_input.text,24)
+ if chosen_name.is_empty():
+  hint.text = "Enter your player name (1–24 characters)"
+  player_name_input.grab_focus()
+  return
+ game.player_name = chosen_name
  hint.text = "Creating room…" if action == "create" else "Joining room…"
  busy = true
  create_button.disabled = true
@@ -215,6 +237,7 @@ func enter_room(action: String, id: String = ""):
  failures = 0
  clear_rows()
  room_name.hide()
+ player_name_row.hide()
  create_button.hide()
  refresh_button.hide()
  game.diagnostics.record("room",{"room":room_id,"role":role})
@@ -270,6 +293,7 @@ func remember_connection():
  # ICE interruption must not make an established game depend on setup again.
  if game.rtc != null and game.rtc.get_connection_state() == WebRTCPeerConnection.STATE_CONNECTED:
   transport_established = true
+  panel.hide()
 
 func _process(_dt):
  if active: remember_connection()
@@ -337,7 +361,7 @@ func sync_room():
  var incoming = result.get("signal","")
  if not accepted and incoming is String and not incoming.is_empty():
   if game.ConnectionCodes.decode(incoming).is_empty():
-   game.rtc_fail("Invalid room connection data · try a new room")
+   game.rtc_fail("Incompatible room · reload both players and create a fresh room")
    return
   accepted = true
   game.signal_in.text = incoming

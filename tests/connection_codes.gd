@@ -32,13 +32,13 @@ func check(value: bool, message: String):
   push_error(message)
 
 func _initialize():
- var data = {"game":"ember-coop","version":1,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\ns=test\r\n","ice":[["0",0,"candidate:1 1 UDP 1 192.0.2.1 5000 typ host"]]}
+ var data = {"game":"ember-coop","version":2,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\ns=test\r\n","ice":[["0",0,"candidate:1 1 UDP 1 192.0.2.1 5000 typ host"]]}
  check(not Codes.decode(Codes.encode(data)).is_empty(),"Offer round trip")
  data.type = "answer"
  check(not Codes.decode(Codes.encode(data)).is_empty(),"Answer round trip")
  for text in ["", "!not-base64!", "A".repeat(65540),Marshalls.utf8_to_base64("[]")]:
   check(Codes.decode(text).is_empty(),"Invalid code accepted")
- for patch in [{"version":2},{"protocol":1},{"protocol":2},{"game":"other"},{"session":"old"},{"sdp":23},{"sdp":"x"},{"ice":[]},{"ice":[["0",0.5,"candidate:x"]]},{"ice":[["0",-1,"candidate:x"]]},{"ice":[["0",0,"invalid"]]},{"ice":[[[],0,"candidate:x"]]}]:
+ for patch in [{"version":1},{"version":3},{"protocol":1},{"protocol":2},{"game":"other"},{"session":"old"},{"sdp":23},{"sdp":"x"},{"ice":[]},{"ice":[["0",0.5,"candidate:x"]]},{"ice":[["0",-1,"candidate:x"]]},{"ice":[["0",0,"invalid"]]},{"ice":[[[],0,"candidate:x"]]}]:
   var invalid = data.duplicate(true)
   invalid.merge(patch,true)
   check(Codes.decode(Codes.encode(invalid)).is_empty(),"Invalid envelope accepted: " + str(patch))
@@ -92,7 +92,7 @@ func scene_checks():
  scene.solo()
  check(scene.signal_out.text.is_empty() and scene.signal_in.text.is_empty(),"Old codes survived reset")
  scene.show_pairing("host")
- var invitation = {"game":"ember-coop","version":1,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]}
+ var invitation = {"game":"ember-coop","version":2,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"offer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]}
  scene.signal_in.text = Codes.encode(invitation)
  scene.rtc_accept()
  check(scene.rtc == null and scene.status.text.begins_with("That is an invitation"),"Host accepted its own invitation")
@@ -105,7 +105,7 @@ func scene_checks():
  scene.signal_in.text = "invalid"
  scene.rtc_accept()
  check(scene.rtc == null and scene.status.text.begins_with("Invalid/incompatible"),"Invalid code changed session")
- scene.signal_in.text = Codes.encode({"game":"ember-coop","version":1,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"answer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]})
+ scene.signal_in.text = Codes.encode({"game":"ember-coop","version":2,"protocol":3,"session":"0123456789abcdef0123456789abcdef","type":"answer","sdp":"v=0\r\n","ice":[["0",0,"candidate:x"]]})
  scene.rtc_accept()
  check(scene.rtc == null and scene.status.text.begins_with("Answer does not match"),"Answer without offer accepted")
  # Mismatched session cannot replace a pending host offer.

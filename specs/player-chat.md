@@ -1,0 +1,29 @@
+# Player identity and chat
+
+Owners: `src/player_chat.gd`, reliable adapter RPC in `src/main.gd`, name entry in `src/private_lobby.gd`, inline Web input/observation in `adapters/web/ember_core_bridge.js`, `tests/player_chat.gd`, `tests/chat_network.gd` and browser checks.
+
+## Human input
+
+Players choose names when creating/joining a room. Other players have name tags above their characters; the local character retains its normal colors and a yellow square. Terra uses the player name Terra. Enter opens chat at the top right, with scrollable RPG-style history and a transparent backdrop. Enter sends; Escape cancels. A sent message also appears above its sender for both players, including that sender. Terra describes its actual actions, asks questions and responds through the same chat.
+
+## Presentation
+
+The compact top-right panel preserves the scene and uses a charcoal translucent plate, readable text and a bounded scroll area. History retains the latest 100 messages. New messages follow the bottom only when the player was already there; reading older messages preserves scroll position. Names and messages are literal text, never markup. Speech plates last 4–10 seconds according to length, follow rendered actor positions, remain within the arena and separate when nearby players speak simultaneously. Other-player name tags follow the same rendered positions. The local yellow square replaces the earlier triangle without changing perspective-relative palettes.
+
+Names are trimmed, 1–24 Unicode code points; messages are trimmed, 1–200. ASCII/C1 controls and directional override/isolate controls reject. Native uses ordinary LineEdit input. Web uses a real inline browser input aligned over the engine composer for typing, IME and paste; Enter/ Escape finish the same session-owned callback. Reset closes and clears the DOM field, cancels its callback generation and clears session content. Chat composition suppresses movement/jump/attack independently of text focus. Menu/setup hides chat and cancels composition.
+
+## Session and delivery
+
+Identity/chat is engine-adapter presentation metadata, outside the portable simulation. The EC03 movement core, fixed ticks, prediction and gameplay messages are unchanged. The adapter handshake envelope is now version 2 with core protocol 3 because both peers need the same RPC layout. The Worker accepts old/new envelopes only in matching version/protocol/session pairs; both players must reload for the new feature.
+
+A reliable RPC sends these bounded metadata packets on Godot's reliable stream, separately from the existing ordered-unreliable gameplay stream. [Godot's channel contract](https://docs.godotengine.org/en/stable/tutorials/networking/high_level_multiplayer.html#channels) describes transfer-mode separation on channel 0. The host derives guest identity from the actual authenticated peer, assigns slots/names and message IDs, and echoes accepted messages to both views. The guest never chooses its author slot. Duplicate IDs, stale sessions, unknown peers, invalid shapes/types and oversized/control text reject. New host state triggers the guest's name announcement; name changes are fixed for that peer lifetime. Local sends are spaced by 500ms; the host permits an eight-message burst with two messages/second sustained replenishment so ordinary reliable batching does not act like spam. This remains a trusted co-op prototype, not account identity or moderation.
+
+Messages/names are not stored in Cloudflare lobbies, diagnostics or persistent browser storage. Disconnect/reset clears session text. The bounded `EmberSocialObserver` exposes only this client's names/messages/composer availability to the player controller and finite browser tests; it cannot send gameplay or chat. Browser chat input uses normal keyboard/DOM editing and the same host acceptance path.
+
+## Terra control
+
+The user authorized resuming Terra after deployment. Its controller chooses bounded keyboard actions and chat messages; there is no scripted follower or automatic chatter. `player.py say-stdin` opens chat with actual Enter, types through the real browser input, presses Enter and waits for sender echo. State includes the most recent 12 messages so the agent can respond to players and avoid repeats. The agent describes actions it actually took, asks occasional relevant questions, and stops when told. Conversation text does not authorize code/deployment/credential work. The helper retains bounded keys, release/cancel cleanup and a four-hour browser lifetime; individual setup rooms still expire after an hour.
+
+## Verification boundary
+
+Unit checks cover identity/slot ownership, session fencing, replay/spoof rejection, literal markup, sender echo, both-view bubbles, bounded history, scroll preservation, Enter/Escape and reset. Actual independent native ENet processes exchange chosen names and messages. Real Godot Web peers cover names, real keyboard text/paste, sender echo, typing suppression, speech/history at 854/960/1280/1920 widths and retained movement continuity. Device/browser/font coverage and long-session reconnect remain separate acceptance work. Record completed evidence in verification.md.

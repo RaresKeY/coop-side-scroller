@@ -33,7 +33,7 @@ Both private lobbies and advanced manual pairing use the same versioned envelope
 
 | Field | Contract |
 | --- | --- |
-| `game`, `version`, `protocol` | `ember-coop`, 1, 1 |
+| `game`, `version`, `protocol` | `ember-coop`, adapter envelope 2, core protocol 3 |
 | `session` | 32 hexadecimal characters; random 128-bit offer identifier |
 | `type` | `offer` or `answer` |
 | `sdp` | Starts `v=0`, at most 32,768 characters |
@@ -42,7 +42,7 @@ Both private lobbies and advanced manual pairing use the same versioned envelope
 
 Fractional JSON indices reject before conversion. The host generates a fresh session ID; the guest echoes it. Answers must match the pending offer/session and signaling state before SDP is applied. The ID correlates attempts, not people. Browser SDP/ICE validation still applies. The lobby HTTP request cap can be reached before the envelope's standalone maximum.
 
-Unversioned early prototype codes are unsupported. Changing the gameplay wire protocol also requires updating the envelope's protocol field. Connection descriptions are private connection metadata, never public room-list content.
+Adapter envelope 2 includes the named-player/chat RPC layout; envelope-1 peers must reload. The Worker pairs only matching envelopes. Unversioned early prototype codes are unsupported. Changing the gameplay wire protocol also requires updating the envelope's protocol field. Connection descriptions are private connection metadata, never public room-list content.
 
 ## Advanced manual pairing
 
@@ -52,7 +52,7 @@ The host sends its invitation, the guest returns a reply, and the host accepts t
 
 ## Browser text and copy dialogs
 
-Access-key and room-name fields open a browser-native single-line input on click or Enter/Space. The dialog selects existing text, supports Enter to confirm, bounds length, disables autocomplete and masks the access key. Cancel preserves the prior value. Native builds use ordinary engine editing.
+Access-key, room-name and player-name fields open a browser-native single-line input on click or Enter/Space. The dialog selects existing text, supports Enter to confirm, bounds length, disables autocomplete and masks the access key. Cancel preserves the prior value. Native builds use ordinary engine editing.
 
 Manual connection entry uses a focused browser-native textarea with Continue/Cancel and normal browser paste. It does not read the asynchronous Clipboard API or rely on Godot's cached clipboard. Dialogs are compact and scrollable over a dimmed game, preserving scene context.
 
