@@ -49,9 +49,12 @@ def wait(check, seconds=20):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--relay', action='store_true')
+    route = parser.add_mutually_exclusive_group()
+    route.add_argument('--relay', action='store_true')
+    route.add_argument('--local-only', action='store_true', help='Use host candidates only; no external STUN/TURN')
+    parser.add_argument('--headless', action='store_true', help='Protocol checks only; does not prove GPU rendering')
     args = parser.parse_args()
-    if not os.environ.get('WAYLAND_DISPLAY') and not os.environ.get('DISPLAY'):
+    if not args.headless and not os.environ.get('WAYLAND_DISPLAY') and not os.environ.get('DISPLAY'):
         parser.error('Run under gamescope --backend headless; see specs/deterministic-coop.md')
     out = ROOT / 'build/deterministic'
     out.mkdir(parents=True, exist_ok=True)
@@ -71,16 +74,28 @@ def main():
         resources.callback(server.shutdown)
         profile = resources.enter_context(tempfile.TemporaryDirectory(prefix='ember-deterministic-browser-'))
         log = resources.enter_context((out / 'browser-console.log').open('w'))
-        browser = subprocess.Popen(['chromium', '--ozone-platform=x11', '--mute-audio',
+        platform = 'headless' if args.headless else 'wayland' if os.environ.get('WAYLAND_DISPLAY') else 'x11'
+        browser_args = ['chromium', '--ozone-platform=' + platform, '--mute-audio',
             '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0',
             '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
-            '--remote-allow-origins=*', f'--user-data-dir={profile}', 'about:blank'], stdout=log, stderr=log)
+            '--remote-allow-origins=*', f'--user-data-dir={profile}', 'about:blank']
+        if args.headless:
+            browser_args.append('--headless=new')
+        if args.local_only:
+            browser_args.extend(['--allow-loopback-in-peer-connection',
+                '--disable-features=WebRtcHideLocalIpsWithMdns'])
+        browser = subprocess.Popen(browser_args, stdout=log, stderr=log)
         control = None
         try:
             port_file = Path(profile) / 'DevToolsActivePort'
             wait(port_file.exists)
             base = f'http://127.0.0.1:{int(port_file.read_text().splitlines()[0])}'
             control = CDP(json.load(urllib.request.urlopen(base + '/json/version'))['webSocketDebuggerUrl'])
+            if args.local_only:
+                # Chromium otherwise limits a data-only page to its default route,
+                # which does not exist in a loopback-only workbench. No capture occurs.
+                control.call('Browser.grantPermissions', {'origin': url,
+                    'permissions': ['audioCapture', 'videoCapture']})
             for _ in range(2):
                 target = control.call('Target.createTarget', {'url': 'about:blank'})['targetId']
                 tabs = json.load(urllib.request.urlopen(base + '/json/list'))
@@ -88,15 +103,18 @@ def main():
                 pages.append(page)
                 page.call('Runtime.enable'); page.call('Page.navigate', {'url': url})
                 wait(lambda: page.evaluate('!!globalThis.probe'))
-            renderer = pages[0].evaluate("""(()=>{const gl=document.createElement('canvas').getContext('webgl');
+            renderer = None if args.headless else pages[0].evaluate("""(()=>{const gl=document.createElement('canvas').getContext('webgl');
               return gl?.getParameter(gl.getExtension('WEBGL_debug_renderer_info').UNMASKED_RENDERER_WEBGL)})()""")
-            assert renderer and 'NVIDIA' in renderer, renderer
+            if not args.headless:
+                assert renderer and 'NVIDIA' in renderer, renderer
             for slot, p in enumerate(pages, 1):
                 # Superseded asynchronous setup must not replace a fresh peer.
                 settled = p.evaluate(f'Promise.allSettled([probe.prepare({3 - slot}),probe.prepare({slot})]).then(results=>results.map(r=>r.status))')
                 assert settled == ['rejected', 'fulfilled'], settled
 
             def ice(page):
+                if args.local_only:
+                    return []
                 if not args.relay:
                     return [{'urls': ['stun:stun.cloudflare.com:3478']}]
                 invitation = json.loads((Path.home() / '.config/cloudflare-api/access-coop-side-scroller-issuer.json').read_text())['token']
@@ -172,7 +190,8 @@ def main():
             assert restored['state_hash'] == solo['state_hash'] and restored['confirmed_tick'] == 1080
             assert all(not p.errors for p in pages), [p.errors for p in pages]
             report = {'result': 'pass', 'transport': 'Cloudflare TURN' if args.relay else 'local direct WebRTC',
-                'renderer': renderer, 'initial': first, 'fresh_transport_recovery': second,
+                'renderer': renderer, 'rendering': 'headless protocol only' if args.headless else 'NVIDIA hardware',
+                'local_only': args.local_only, 'initial': first, 'fresh_transport_recovery': second,
                 'creator_departure_solo_tick': solo['confirmed_tick'], 'local_reload_tick': restored['confirmed_tick'],
                 'boundary': 'Two local Chromium pages, experimental adapter; recovery coordinated by test, background throttling disabled; transport counters are not provider billing'}
             report_path.write_text(json.dumps(report, indent=2) + '\n')

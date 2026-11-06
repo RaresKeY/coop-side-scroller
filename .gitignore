@@ -1,4 +1,5 @@
 .godot/
+.local/
 assets/private/
 build/
 preview.png

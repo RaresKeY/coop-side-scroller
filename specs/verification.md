@@ -1,4 +1,9 @@
-# Verification and acceptance
+# Verification
+
+## General x86 networking review — 2026-11-06
+
+The [current review receipt](../reviews/networking-2026-11-06.md) records native/Wasm and cross-compiler contracts, 19 offline service tests, four CTests, 13 interpolation checks, seven real-main/animation-clock checks, CDP/HTTP regressions, actual same-machine ENet and browser WebRTC recovery, and NVIDIA Godot/WebGL verification. All ran on General x86; no Runpod or live TURN service was used. [Snapshot presentation](snapshot-presentation.md) owns the new behavior. The clone uses fallback art; private art, independent networks, phone/human acceptance and the full Godot Web room flow remain unverified.
+ and acceptance
 
 Recorded evidence as of **2026-10-21**. This is a consolidated record of completed checks, not a claim that every suite was rerun for each documentation change. Implementation contracts live in the focused specs; commands and requirements are in [builds and targets](build-targets.md).
 
@@ -80,7 +85,7 @@ Ignored `build/` reports/captures are local evidence, not distributed source. Ea
 
 ## Still unverified
 
-Firefox and broader browsers/devices; selected direct paths and automatic fallback; blocked UDP with TURN TCP/TLS-only; real-browser expired/revoked credentials; interrupted connectivity, host exit/reload/rejoin and network changes; longer sessions and sustained loss/load. Reconnect/ICE restart, credential refresh, prediction/interpolation and host migration are not implemented. One successful workstation↔Runpod relay session does not establish general NAT reliability. Future work is tracked in [BACKLOG.md](../BACKLOG.md).
+Firefox and broader browsers/devices; selected direct paths and automatic fallback; blocked UDP with TURN TCP/TLS-only; real-browser expired/revoked credentials; interrupted connectivity, host exit/reload/rejoin and network changes; longer sessions and sustained loss/load. Reconnect/ICE restart, credential refresh, local prediction and host migration are not implemented; the current remote-position presentation contract is linked above. One successful workstation↔Runpod relay session does not establish general NAT reliability. Future work is tracked in [BACKLOG.md](../BACKLOG.md).
 
 Room-error diagnostic build `ab9facf` passed connection/setup regressions (HTTP status/code formatting and rejection of arbitrary response text), local Chromium startup/input, publication audit, Pages build completion, hosted HTML/PCK/engine/core/bridge hash comparison and hosted Chromium startup/input. This validates diagnostic presentation and publication, not the cause of the reported room failure.
 

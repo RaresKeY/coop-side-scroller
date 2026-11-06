@@ -40,7 +40,7 @@ Remaining integration work:
 
 ## Gameplay and portability
 
-- Add guest interpolation and prediction/reconciliation; current replicas display 20 Hz authoritative snapshots without smoothing or rollback.
+- Add local guest prediction/reconciliation. Remote-actor position interpolation is implemented in the Godot adapter; the local guest still uses authoritative snapshots. See [presentation bounds](specs/snapshot-presentation.md).
 - Evaluate reliable gameplay event IDs/acknowledgements, action-tick reconciliation and prolonged loss handling. Existing input/snapshot sequencing does not make events a reliable stream.
 - Integrate real level collision, enemies and game-specific movement through explicit core/adapter contracts. This prototype is not a drop-in multiplayer retrofit for another game.
 - Add Unity/Unreal/custom-engine and additional OS adapters only against concrete target requirements. Current integration guidance is not implementation evidence.

@@ -72,4 +72,4 @@ The single-thread Compatibility export runs on GitHub Pages and Firebase Hosting
 
 [Build commands and targets](specs/build-targets.md) · [C ABI/wire contract](specs/c-abi.md) · [Unity/Unreal/custom-engine guidance](design/engine-integration.md) · [Remaining work](BACKLOG.md)
 
-Tested: Linux C/C++, Godot Linux, freestanding wasm32, and Godot Web in Chromium/Chrome. Other engine and OS adapters are documented possibilities. The native/Wasm byte-identical test trace is bounded evidence, not a deterministic-lockstep guarantee. Game state uses host snapshots; prediction and interpolation are not implemented.
+Tested: Linux C/C++, Godot Linux, freestanding wasm32, and Godot Web in Chromium/Chrome. Other engine and OS adapters are documented possibilities. The native/Wasm byte-identical test trace is bounded evidence, not a deterministic-lockstep guarantee. Game state uses host snapshots with [remote-position interpolation](specs/snapshot-presentation.md) in the Godot adapter. Local prediction/reconciliation and shipping rollback remain unimplemented; the deterministic experiment is separate.

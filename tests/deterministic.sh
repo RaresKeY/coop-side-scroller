@@ -24,3 +24,4 @@ deno run --no-config --allow-read="$ROOT/build/wasm/ember_core.wasm,$ROOT/build/
  "$ROOT/tests/deterministic_wasm.mjs"
 python3 -m unittest discover -s "$ROOT/tests" -p 'test_network_budget.py'
 python3 -m unittest discover -s "$ROOT/tests" -p 'test_deterministic_browser.py'
+python3 -m unittest discover -s "$ROOT/tests" -p 'test_browser_cdp.py'

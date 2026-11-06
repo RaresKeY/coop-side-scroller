@@ -7,6 +7,8 @@ var core
 const RelayCredentials = preload("res://src/relay_credentials.gd")
 const ConnectionCodes = preload("res://src/connection_codes.gd")
 const LabKeys = preload("res://src/lab_keys.gd")
+const SnapshotInterpolator = preload("res://src/snapshot_interpolator.gd")
+var snapshot_interpolator = SnapshotInterpolator.new()
 var lab_role := ""
 var lab_socket: PacketPeerUDP
 var bus_port := 0
@@ -576,12 +578,14 @@ func rtc_update(now: int):
 
 func _process(_dt):
  rtc_update(Time.get_ticks_msec())
+ update_sprite_positions()
  if capture_at > 0 and elapsed >= capture_at:
   capture_at = -1
   get_viewport().get_texture().get_image().save_png("res://preview.png")
   get_tree().quit()
 
 func reset_network():
+ snapshot_interpolator.reset()
  connection_generation += 1
  if OS.has_feature("web"):
   var browser_clipboard = JavaScriptBridge.get_interface("EmberClipboard")
@@ -707,12 +711,13 @@ func gameplay_message(bytes: PackedByteArray):
  if sender_slot == 0: return
  var before = core.command(10,11)
  var result = core.receive_message(sender_slot,bytes)
+ sync_core_view()
  if mode == "client" and result == 0:
+  snapshot_interpolator.push(core.command(10,0),players,Time.get_ticks_msec())
   var sequence = core.command(10,11)
   last_snapshot_ms = Time.get_ticks_msec()
   if before > 0: snapshot_gaps += maxi(0,sequence-before-1)
   last_snapshot_seq = sequence
- sync_core_view()
 
 @rpc("any_peer", "call_remote", "unreliable")
 func ping(sent: int):
@@ -833,6 +838,16 @@ func update_sprites():
   else:
    sprite.position = Vector2(s.x,s.y-17)
    sprite.frame = 4 if s.animation == 3 else 3 if s.animation == 2 else 1+int(elapsed*10)%2 if s.animation in [1,4] else 0
+
+func update_sprite_positions():
+ if mode != "client": return
+ var presented = snapshot_interpolator.sample(players,Time.get_ticks_msec(),2)
+ for id in presented:
+  if not sprites.has(id): continue
+  var sprite = sprites[id]
+  var state = presented[id]
+  # CharacterView.present advances a 60 Hz pose clock; rendering only moves it.
+  sprite.position = Vector2(state.x,state.y if sprite is AnimatedSprite2D else state.y-17.0)
 
 func _draw():
  draw_rect(Rect2(0,0,960,540),Color("17212d"))

@@ -13,6 +13,7 @@ Start with [current architecture](architecture.md): portable C++ core, Godot nat
 | [Deterministic co-op experiment](deterministic-coop.md) | `core/include/ember_deterministic.h`, `core/src/ember_deterministic.cpp`, `tools/deterministic_lab.py`, typed Web adapter | Comparing lockstep/rollback, complete checkpoints, input history and no-game-server recovery |
 | [Builds and targets](build-targets.md) | `CMakeLists.txt`, `tools/build_core.py`, `tests/`, `vendored/` | Building/testing or assessing tested platform support |
 | [Prototype](prototype.md) | `src/main.gd`, `project.godot`, `main.tscn` | Changing gameplay, menus, animation or transport |
+| [Snapshot presentation](snapshot-presentation.md) | `src/snapshot_interpolator.gd`, `src/main.gd`, snapshot tests | Changing remote interpolation, session reset or render/pose clocks |
 | [Character presentation](character-presentation.md) | `src/character_view.gd`, `shaders/`, animation captures/tests | Changing sprite size, anchors, atlas slicing, frame timing or sampling |
 | [Browser connection](browser-connection.md) | `src/connection_codes.gd`, WebRTC in `src/main.gd`, `adapters/web/ember_core_bridge.js`, `tests/connections.sh` | Changing browser pairing, TLS compatibility routing, validation, timeouts or assessing internet/NAT requirements |
 | [Connection diagnostics](diagnostics.md) | `src/diagnostics.gd`, Worker, Cloudflare operator | Recording and retrieving playtest failures, build identity, test markers, selected transport and traffic rates |
@@ -29,4 +30,5 @@ Supporting documents:
 - [Deterministic comparison](../design/deterministic-coop.md) and [no-server budget](../design/no-server-budget.md): experiment results, integration choices and free-allowance assumptions.
 - [Engine integration](../design/engine-integration.md): C ABI guidance for engines beyond the tested Godot adapter.
 - [Runpod testing](../design/runpod-agent-browser.md): separate-controller lifecycle and cross-network harness.
+- [Networking research](../research/networking-models/_readme.md): conventional models versus this host snapshot game and its deterministic experiment.
 - [Remaining work](../BACKLOG.md): unimplemented features and acceptance gaps.

@@ -20,7 +20,7 @@ The Godot adapter presents once per 60 Hz physics callback. Idle breathes at 6 f
 
 Jump frames follow real velocity: frames 0–2 are short takeoff poses; 3–7 follow rising velocity; frame 8 covers the apex; 9–12 follow descent. On an observed ground-contact transition, idle presentation plays the cosmetic landing/recovery sequence `13,14,15,16,16,14,13,12,0`, one tick each, then resumes idle. Movement/attacks immediately take precedence; there is no landing input lock or added simulation state. A jump that is already falling when an attack ends does not replay takeoff. Hurt/dead remain reserved clips, visually audited but not activated by this prototype's gameplay.
 
-C++ jump tuning is in [portable-core.md](portable-core.md). All 17 jump source frames occur in the tested held-jump plus landing playback. Tap jumps may skip poses. Replica observations can coalesce frame/state transitions at the 20 Hz snapshot cadence; no new network interpolation or rollback is claimed.
+C++ jump tuning is in [portable-core.md](portable-core.md). All 17 jump source frames occur in the tested held-jump plus landing playback. Tap jumps may skip poses. Replica observations can coalesce frame/state transitions at the 20 Hz snapshot cadence. [Remote-position interpolation](snapshot-presentation.md) does not blend those logical animation states or add shipping rollback.
 
 ## Runtime superscaling
 
