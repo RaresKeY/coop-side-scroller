@@ -10,6 +10,7 @@ Start with [current architecture](architecture.md): portable C++ core, Godot nat
 | [Terminology](terminology.md) | Core, adapter and service contracts | Matching plain-language names to technical terms; distinguishing credentials, IDs and timing measurements |
 | [Portable core](portable-core.md) | `core/`, `adapters/` | Changing fixed-tick simulation, authority or state/event boundaries |
 | [C ABI](c-abi.md) | `core/include/ember_core.h`, `core/src/ember_core.cpp` | Changing lifetime, status, native layouts, serialization or bridge operations |
+| [Deterministic co-op experiment](deterministic-coop.md) | `core/include/ember_deterministic.h`, `core/src/ember_deterministic.cpp`, `tools/deterministic_lab.py`, typed Web adapter | Comparing lockstep/rollback, complete checkpoints, input history and no-game-server recovery |
 | [Builds and targets](build-targets.md) | `CMakeLists.txt`, `tools/build_core.py`, `tests/`, `vendored/` | Building/testing or assessing tested platform support |
 | [Prototype](prototype.md) | `src/main.gd`, `project.godot`, `main.tscn` | Changing gameplay, menus, animation or transport |
 | [Character presentation](character-presentation.md) | `src/character_view.gd`, `shaders/`, animation captures/tests | Changing sprite size, anchors, atlas slicing, frame timing or sampling |
@@ -25,6 +26,7 @@ Supporting documents:
 
 - [Internet connectivity](../design/internet-connectivity.md): NAT, routing, certificates and native/browser differences.
 - [Service decision](../design/network-options.md): selected provider and reasons to retain or revisit earlier alternatives.
+- [Deterministic comparison](../design/deterministic-coop.md) and [no-server budget](../design/no-server-budget.md): experiment results, integration choices and free-allowance assumptions.
 - [Engine integration](../design/engine-integration.md): C ABI guidance for engines beyond the tested Godot adapter.
 - [Runpod testing](../design/runpod-agent-browser.md): separate-controller lifecycle and cross-network harness.
 - [Remaining work](../BACKLOG.md): unimplemented features and acceptance gaps.

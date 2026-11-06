@@ -2,6 +2,8 @@
 
 Source of truth: `core/include/ember_core.h`. Symbol prefix is `ec_v1_`; ABI value is `0x00010000`, protocol version is independently 1. `create` requires the exact ABI version. Future incompatible layouts/protocols require a new version, not reinterpretation of existing messages.
 
+`core/include/ember_deterministic.h` adds separate opaque handles and `ec_v1_deterministic_*` functions using the same ABI value and copied view/event layouts. Its `EDI1` input packets and `EDC1` checkpoints never enter `ec_v1_receive`; see [the experimental contract](deterministic-coop.md). The existing role values, numeric bridge and `EC01` wire layouts below retain their meanings.
+
 ## Calls and ownership
 
 All arguments and fields use uint32_t/int32_t, uint8_t buffers, an opaque EC_Handle pointer, or caller-owned fixed-layout structs. No STL types, engine objects or exceptions cross the ABI. Native view sizes are asserted in C++: EC_Player=40, EC_View=116, EC_Event=16 bytes, with ordinary 4-byte field alignment. C ABI structs are native views and **must not be sent over the network**. No returned view/message/event points into mutable internal storage.

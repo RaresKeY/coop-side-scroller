@@ -1,4 +1,5 @@
 #include "ember_core.h"
+#include "simulation.h"
 
 static_assert(sizeof(EC_Player) == 40, "C ABI player layout");
 static_assert(sizeof(EC_View) == 116, "C ABI view layout");
@@ -44,10 +45,6 @@ bool newer(uint32_t a, uint32_t b) {
   uint32_t d = a - b;
   return d && d < UINT32_C(0x80000000);
 }
-int32_t clamp(int32_t x, int32_t lo, int32_t hi) {
-  return x < lo ? lo : x > hi ? hi : x;
-}
-int32_t absolute(int32_t x) { return x < 0 ? -x : x; }
 void put(uint8_t *p, uint32_t n) {
   for (uint32_t i = 0; i < 4; i++)
     p[i] = uint8_t(n >> (8 * i));
@@ -195,61 +192,15 @@ int32_t ec_v1_tick(EC_Handle *h) {
     }
     return EC_OK;
   }
-  h->tick++;
-  for (uint32_t i = 0; i < 2; i++) {
-    auto &p = h->players[i];
-    if (!p.active)
-      continue;
+  ember_sim::Input frame_inputs[2];
+  for (uint32_t i = 0; i < 2; ++i) {
     auto in = h->inputs[i];
-    if (i && h->tick - in.at > 18) {
-      in.axis = 0;
-      in.flags = 0;
-    }
-    p.x = clamp(p.x + (2833 * in.axis) / 1000, 24000, 936000);
-    if (in.axis)
-      p.facing = in.axis > 0 ? 1 : -1;
-    uint32_t jump = (in.flags & EC_INPUT_JUMP) != 0;
-    if (jump && !h->held_jump[i] && p.grounded)
-      p.vy = -6000;
-    h->held_jump[i] = jump;
-    // Variable-height rise, a short apex and a quicker fall.
-    if (!jump && p.vy < -2400)
-      p.vy = -2400;
-    p.vy += p.vy < 0 ? 300 : 500;
-    p.y += p.vy;
-    if (p.y >= 448000) {
-      p.y = 448000;
-      p.vy = 0;
-      p.grounded = 1;
-    } else
-      p.grounded = 0;
-    if (p.attack_ticks)
-      p.attack_ticks--;
-    if ((in.flags & EC_INPUT_ATTACK) && !p.attack_ticks) {
-      p.attack_ticks = 24;
-      p.attack_id++;
-      emit(h, EC_EVENT_ATTACK, p.slot, p.attack_id);
-    }
-    // The downstroke reaches the target at tick 15, before recovery.
-    if (p.attack_ticks == 9) {
-      int32_t dx = 720000 - p.x;
-      if (h->enemy_hp && absolute(dx) < 65000 &&
-          absolute(p.y - 448000) < 45000 &&
-          (dx == 0 || (dx > 0 ? 1 : -1) == p.facing)) {
-        h->enemy_hp--;
-        emit(h, EC_EVENT_DAMAGE, p.slot, h->enemy_hp);
-      }
-    }
-    uint32_t anim = p.attack_ticks ? EC_ANIM_ATTACK
-                    : !p.grounded  ? EC_ANIM_JUMP
-                    : in.axis
-                        ? (absolute(in.axis) < 500 ? EC_ANIM_WALK : EC_ANIM_RUN)
-                        : EC_ANIM_IDLE;
-    if (anim != p.animation) {
-      p.animation = anim;
-      emit(h, EC_EVENT_ANIMATION, p.slot, anim);
-    }
+    if (i && h->tick + 1 - in.at > 18) in = {};
+    frame_inputs[i] = {in.axis, in.flags};
   }
+  ember_sim::step(*h, frame_inputs, [h](uint32_t type, uint32_t slot, uint32_t value) {
+    emit(h, type, slot, value);
+  });
   if (h->tick % 3 == 0)
     write_snapshot(h);
   return EC_OK;

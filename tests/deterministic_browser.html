@@ -1,0 +1,139 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Deterministic peer protocol probe</title>
+<p id="status">Loading the test core…</p>
+<script type="module">
+import {createDeterministicPeer} from '/adapters/web/deterministic_peer.mjs';
+const module = await WebAssembly.compile(await (await fetch('/build/wasm/ember_core.wasm')).arrayBuffer());
+const session = Uint8Array.from({length: 16}, (_, i) => i + 1); // Public test fixture only.
+let peer, slot, rtc, channel, interval, generation = 0, next = 0, target = 0, sent = 0;
+let error = null, eventKeys = new Set(), events = 0, messages = 0, payloadBytes = 0;
+function check(result, label) { if (result < 0) throw new Error(label + ': ' + result); }
+function controls(tick, player) {
+  const value = (Math.imul(tick, 1103515245) + player * 12345 + Math.imul(1, 2654435761)) >>> 0;
+  let axis = [1000, -1000, 333, -499, 0, 1000][(Math.floor(tick / 73) + 1 + player) % 6];
+  if (tick < 170) axis = 1000;
+  return [axis, (tick % 47 < 7 ? 1 : 0) | (value & 8 ? 2 : 0)];
+}
+function drain() {
+  for (const e of peer.events()) {
+    const key = JSON.stringify(e);
+    if (eventKeys.has(key)) throw new Error('Duplicate confirmed event');
+    eventKeys.add(key); events++;
+  }
+}
+function install(c, activeGeneration) {
+  channel = c; c.binaryType = 'arraybuffer';
+  c.onmessage = event => {
+    if (activeGeneration !== generation) return;
+    try {
+      const result = peer.receive(3 - slot, new Uint8Array(event.data));
+      if (result !== -5) check(result, 'receive');
+    }
+    catch (e) { error = String(e); }
+  };
+}
+async function description(connection, activeGeneration) {
+  if (connection.iceGatheringState !== 'complete') await new Promise((resolve, reject) => {
+    const cleanup = () => { clearTimeout(timer); connection.removeEventListener('icegatheringstatechange', ready); };
+    const timer = setTimeout(() => { cleanup(); reject(new Error('ICE gather timeout')); }, 20000);
+    const ready = () => {
+      if (connection.iceGatheringState === 'complete') {
+        cleanup(); resolve();
+      }
+    };
+    connection.addEventListener('icegatheringstatechange', ready); ready();
+  });
+  if (activeGeneration !== generation) throw new Error('Superseded connection');
+  return connection.localDescription.toJSON();
+}
+function send(first, count) {
+  const packet = peer.pack(first, count);
+  channel.send(packet); messages++; payloadBytes += packet.length;
+}
+globalThis.probe = {
+  async prepare(player, checkpoint = null, epoch = 0, mask = 3) {
+    clearInterval(interval); generation++; rtc?.close(); channel = null;
+    peer?.close(); peer = null; rtc = null;
+    const activeGeneration = generation;
+    const candidate = await createDeterministicPeer({module, slot: player, session});
+    try {
+      if (activeGeneration !== generation) throw new Error('Superseded preparation');
+      if (checkpoint) check(candidate.load(Uint8Array.from(checkpoint), epoch, mask), 'restore');
+    } catch (e) { candidate.close(); throw e; }
+    peer = candidate; slot = player;
+    error = null; events = messages = payloadBytes = 0; eventKeys = new Set();
+    return peer.stats();
+  },
+  async connect(servers, relay, offer = null) {
+    clearInterval(interval); generation++; rtc?.close(); channel = null;
+    const activeGeneration = generation;
+    const connection = rtc = new RTCPeerConnection({iceServers: servers, iceTransportPolicy: relay ? 'relay' : 'all'});
+    connection.ondatachannel = e => { if (activeGeneration === generation) install(e.channel, activeGeneration); };
+    if (offer) {
+      await connection.setRemoteDescription(offer); await connection.setLocalDescription(await connection.createAnswer());
+    } else {
+      install(connection.createDataChannel('deterministic-probe', {ordered: false, maxRetransmits: 0}), activeGeneration);
+      await connection.setLocalDescription(await connection.createOffer());
+    }
+    return description(connection, activeGeneration);
+  },
+  async answer(answer) {
+    const connection = rtc, activeGeneration = generation;
+    await connection.setRemoteDescription(answer);
+    if (activeGeneration !== generation) throw new Error('Superseded connection');
+  },
+  start(end) {
+    if (channel?.readyState !== 'open') throw new Error('DataChannel not open');
+    clearInterval(interval);
+    next = peer.stats().local_through; target = next; sent = next;
+    interval = setInterval(() => {
+      try {
+        if (error || channel.readyState !== 'open' || channel.bufferedAmount > 65536) return;
+        if (target < end) target++;
+        if (next < end) { next++; check(peer.input(next, ...controls(next, slot)), 'input'); }
+        check(peer.advance(target), 'advance'); drain();
+        const stats = peer.stats();
+        if (target % 2 === 0 || target === end) {
+          const count = Math.min(8, next - sent); send(count ? sent + 1 : 0, count); sent += count;
+        }
+        if (target % 12 === 0 && stats.peer_ack < next)
+          send(stats.peer_ack + 1, Math.min(8, next - stats.peer_ack));
+        document.querySelector('#status').textContent = `Player ${slot}: ${stats.confirmed_tick}/${end} confirmed`;
+      } catch (e) { error = String(e); clearInterval(interval); }
+    }, 1000 / 60);
+  },
+  stop() { clearInterval(interval); return [...peer.save()]; },
+  status() { return {error, ready: channel?.readyState, connection: rtc?.connectionState,
+    ice: rtc?.iceConnectionState, gathering: rtc?.iceGatheringState,
+    localCandidateCount: (rtc?.localDescription?.sdp.match(/^a=candidate:/gm) || []).length,
+    remoteCandidateCount: (rtc?.remoteDescription?.sdp.match(/^a=candidate:/gm) || []).length,
+    ...peer?.stats(), events, messages, payloadBytes}; },
+  save() { return [...peer.save()]; },
+  eventTrace() { return Array.from(eventKeys, key => Object.values(JSON.parse(key))); },
+  persist() { localStorage.setItem('deterministic-probe-checkpoint', JSON.stringify([...peer.save()])); },
+  restoreLocal() {
+    const checkpoint = JSON.parse(localStorage.getItem('deterministic-probe-checkpoint'));
+    return this.prepare(2, checkpoint, 3, 2);
+  },
+  solo(end) {
+    clearInterval(interval); const start = peer.stats().local_through;
+    for (let tick = start + 1; tick <= end; ++tick) {
+      check(peer.input(tick, ...controls(tick, slot)), 'solo input');
+      check(peer.advance(tick), 'solo advance'); drain();
+    }
+    return this.status();
+  },
+  async route() {
+    const stats = await rtc.getStats();
+    const transport = [...stats.values()].find(s => s.type === 'transport' && s.selectedCandidatePairId);
+    const pair = stats.get(transport?.selectedCandidatePairId);
+    const local = stats.get(pair?.localCandidateId), remote = stats.get(pair?.remoteCandidateId);
+    return {local: local?.candidateType, remote: remote?.candidateType,
+      relayProtocol: local?.relayProtocol || null, bytesSent: transport?.bytesSent,
+      bytesReceived: transport?.bytesReceived, rtt: pair?.currentRoundTripTime};
+  },
+  close() { clearInterval(interval); generation++; rtc?.close(); peer?.close(); },
+};
+document.querySelector('#status').textContent = 'Protocol probe ready';
+</script>

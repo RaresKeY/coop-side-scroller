@@ -1,6 +1,25 @@
 # Verification and acceptance
 
-Recorded evidence as of **2026-10-19**. This is a consolidated record of completed checks, not a claim that every suite was rerun for each documentation change. Implementation contracts live in the focused specs; commands and requirements are in [builds and targets](build-targets.md).
+Recorded evidence as of **2026-10-21**. This is a consolidated record of completed checks, not a claim that every suite was rerun for each documentation change. Implementation contracts live in the focused specs; commands and requirements are in [builds and targets](build-targets.md).
+
+## Deterministic co-op experiment
+
+The additive C ABI and typed Wasm adapter pass three 6,000-tick seeds (18,000 ticks) with every confirmed state hash, event and sampled canonical checkpoint matching GCC, Clang and Wasm. ASan/UBSan contracts cover immutable/conflicting inputs, malformed packet atomicity, bounded prediction/history, retired packets sharing slots with unacknowledged inputs, the final supported tick's single/eight-record packet boundaries, full checkpoint continuity including held-jump memory, epoch fencing, creator departure and desync freeze/recovery. The typed adapter also preserves session identity when its caller reuses the buffer during asynchronous instantiation. C11 consumption and four Release CMake/CTest cases pass. The original core sanitizer, native/Wasm snapshot byte trace, bridge handle guard and two-process Godot ENet combat checks also pass after the shared-rule extraction. A cold native run initially lacked imported resources; explicit managed Godot import prepared the project before the successful ENet rerun.
+
+`tools/deterministic_lab.py` compares twelve two-peer scenarios: lockstep with six input-delay ticks versus rollback with twelve prediction ticks; two/four-tick input batching; clean delivery, 50 ms one-way delay with up to 33 ms jitter and 5% seeded packet loss, and a modeled 121-frame suspension. Every final checkpoint and confirmed event stream matches an independent impairment-free reference pair, with zero dropped events. These are simulated impairments, not physical network/browser suspension evidence.
+
+| WAN scenario | Encoded bytes/s, both peers | Largest measured horizontal correction | Maximum simulation lag behind target |
+| --- | --- | --- | --- |
+| Rollback, two-tick batches | 4,155.75 | 26.432 reference pixels | 216.67 ms |
+| Rollback, four-tick batches | 2,715.66 | 33.984 reference pixels | 333.33 ms |
+
+These counts include attempted input/ACK/retransmission packets, not engine/WebRTC/TURN framing or billed egress. Scripted input changes deliberately stress prediction. They establish a batching tradeoff, not an accepted gameplay feel or a production bandwidth forecast. Execution-count and whole-lab elapsed counters are not isolated native CPU benchmarks.
+
+The real Chromium probe passes selected Cloudflare relay/relay DataChannels in two independent Wasm page contexts, then resumes from a complete checkpoint with fresh Wasm instances, WebRTC connections and TURN credentials. Slot 2 continues alone to tick 1080 after the creator leaves, and a locally saved checkpoint restores across a page reload. Confirmed hashes and complete confirmed event streams match a freshly run native oracle at ticks 600 and 840; solo continuation also matches native checkpoint bytes and events with zero event drops. Overlapping peer preparations reject the superseded operation. The renderer is hardware NVIDIA RTX 2080 Ti; the selected browser-to-TURN transport was TCP. Test code coordinates recovery barriers. It does not prove automatic Godot/private-lobby reconnect, geographic connectivity, TLS-only routing, background suspension or anti-cheat. Transport stats are not provider billing.
+
+A STUN-assisted direct probe gathered zero candidates on both local pages and failed setup explicitly; no general direct-path conclusion follows. Gamescope also returned 139 during shutdown after successful browser-child completion; the shell wrapper records and checks child status independently and reports that runner defect separately. Results: ignored `build/deterministic/{report,native-traces,clang-traces,browser-relay}.json` and `build/deterministic-*.log`.
+
+The offline Python checks pass the browser server's GET/HEAD allowlist and the budget calculator's units, shared allowance/reserve, invalid values and extreme numeric range handling. Official free-tier terms were checked; the current Cloudflare operator supplies no billing/relay-total command, so provider-metered totals and a hard zero-charge cutoff are not claimed. See [the budget assessment](../design/no-server-budget.md) and [remaining integration work](../BACKLOG.md#deterministic-co-op-with-existing-cloudflare-services).
 
 ## Supported evidence boundary
 

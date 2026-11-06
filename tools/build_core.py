@@ -15,7 +15,7 @@ except FileNotFoundError:
  raise SystemExit('Portable core missing or stale. Run: python3 tools/build_core.py')
 fcntl.flock(build_lock,fcntl.LOCK_SH if args.check else fcntl.LOCK_EX)
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
-source_paths=sorted([*ROOT.glob('core/include/*.h'),*ROOT.glob('core/src/*.cpp'),ROOT/'adapters/godot/native_extension.cpp',ROOT/'examples/standalone.cpp',ROOT/'tools/build_core.py',ROOT/'vendored/dependencies.json',ROOT/'vendored/godot/gdextension_interface.h'])
+source_paths=sorted([*ROOT.glob('core/include/*.h'),*ROOT.glob('core/src/*.cpp'),*ROOT.glob('core/src/*.h'),ROOT/'adapters/godot/native_extension.cpp',ROOT/'examples/standalone.cpp',ROOT/'tools/build_core.py',ROOT/'vendored/dependencies.json',ROOT/'vendored/godot/gdextension_interface.h'])
 def source_state():return {str(p.relative_to(ROOT)):digest(p) for p in source_paths}
 def compiler_state():
  result={}
@@ -42,12 +42,13 @@ def run(command):subprocess.run(command,cwd=ROOT,check=True)
 sources_before=source_state();compilers=compiler_state()
 with tempfile.TemporaryDirectory(prefix='.core-build-',dir=ROOT/'build') as temporary:
  stage=Path(temporary)
- run(['g++',*flags,'-Wl,--as-needed','-fPIC','-shared','-DEMBER_BUILD','core/src/ember_core.cpp','-o',str(stage/'libember_core.so')])
+ core_sources=['core/src/ember_core.cpp','core/src/ember_deterministic.cpp']
+ run(['g++',*flags,'-Wl,--as-needed','-fPIC','-shared','-DEMBER_BUILD',*core_sources,'-o',str(stage/'libember_core.so')])
  run(['g++',*flags,'-Wl,--as-needed','-fPIC','-shared','-I',str(header.parent),'adapters/godot/native_extension.cpp','-L',str(stage),'-lember_core','-Wl,-rpath,$ORIGIN','-o',str(stage/'libember_godot.so')])
  (stage/'ember.gdextension').write_text('[configuration]\nentry_symbol="ember_core_extension_init"\ncompatibility_minimum="4.4"\nreloadable=false\n[libraries]\nlinux.x86_64="res://build/native/libember_godot.so"\n')
  run(['g++',*flags,'-Wl,--as-needed','examples/standalone.cpp','-L',str(stage),'-lember_core','-Wl,-rpath,$ORIGIN','-o',str(stage/'standalone')])
- exports=re.findall(r'EC_API\s+[^;]+?\b(ec_v1_\w+)\s*\(', (ROOT/'core/include/ember_core.h').read_text())
- run(['clang++','--target=wasm32',*flags,'-ffreestanding','-nostdlib','-fno-builtin','core/src/ember_core.cpp','core/src/wasm_memory.cpp','-Wl,--no-entry','-Wl,--export-memory','-Wl,--export=__heap_base','-Wl,--initial-memory=1048576','-Wl,--max-memory=1048576',*[f'-Wl,--export={name}' for name in exports],'-o',str(stage/'ember_core.wasm')])
+ exports=re.findall(r'EC_API\s+[^;]+?\b(ec_v1_\w+)\s*\(', '\n'.join(p.read_text() for p in sorted(ROOT.glob('core/include/*.h'))))
+ run(['clang++','--target=wasm32',*flags,'-ffreestanding','-nostdlib','-fno-builtin',*core_sources,'core/src/wasm_memory.cpp','-Wl,--no-entry','-Wl,--export-memory','-Wl,--export=__heap_base','-Wl,--initial-memory=1048576','-Wl,--max-memory=1048576',*[f'-Wl,--export={name}' for name in exports],'-o',str(stage/'ember_core.wasm')])
  if source_state()!=sources_before or compiler_state()!=compilers:raise SystemExit('Sources or compilers changed during compilation; retry build')
  versions={name:subprocess.check_output([name,'--version'],text=True).splitlines()[0] for name in compilers}
  data={'schema':1,'sources':sources_before,'compilers':compilers,'versions':versions,'outputs':{path:digest(stage/Path(path).name) for path in outputs}}

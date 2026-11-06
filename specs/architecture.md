@@ -30,6 +30,8 @@ The core does not own clocks, input devices, rendering, audio, assets, engine ph
 
 Native solo/Host/Join uses the same core through the GDExtension. ENet is a separate transport with its own reachability requirements; native-to-browser play is not implemented. Advanced manual browser pairing remains a diagnostic alternative to the lobby.
 
+A separate [deterministic co-op experiment](deterministic-coop.md) now runs shared C++ rules independently on both peers, with bounded rollback, compact input batches and complete checkpoints. Its native impairment lab and typed Wasm/WebRTC probe compare that alternative; it is not selected by the Godot game or existing private-lobby flow. Automatic service-side recovery and optional cloud checkpoint storage remain integration work.
+
 ## Contracts and evidence
 
 - [Portable core](portable-core.md): ticks, units, authority and bounds.
