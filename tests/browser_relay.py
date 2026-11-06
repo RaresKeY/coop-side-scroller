@@ -77,7 +77,7 @@ def run(lobby=False, url=None):
     guest.capture(ROOT/'build/lobby-join.png')
     index=guest.evaluate('testRoomList.findIndex(r=>r.id==='+json.dumps(room_id)+')')
     assert 0<=index<3,'Test room outside visible rows; do not join another room'
-    guest.click(160,324+index*36) # First room's Join button.
+    guest.click(160,338+index*36) # First room's Join button.
     wait_until(lambda:guest.evaluate('testPeers.length'),25)
     wait_until(lambda:all(page.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay' for page in [host,guest]),30)
     print('LOBBY AUTOMATIC SIGNALING',flush=True)

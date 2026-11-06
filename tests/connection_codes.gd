@@ -196,6 +196,18 @@ func scene_checks():
  fake_lobby.complete_request.emit()
  check(fake_lobby.rows.get_child_count()==0 and fake_lobby.listed_rooms=="","Failed refresh retained stale room buttons")
  check(fake_lobby.next_poll < Time.get_ticks_msec()+6000,"Transient directory failure stopped polling")
+ # A slow directory read cannot swallow a membership click or overwrite it
+ # when its old callback completes with the new request already in progress.
+ fake_lobby.refresh()
+ check(fake_lobby.listing_busy and not fake_lobby.busy,"Directory refresh blocks membership actions")
+ fake_lobby.enter_room("join","ABCDEF12")
+ check(fake_lobby.sent.action=="join" and fake_lobby.busy,"In-flight refresh swallowed Join")
+ fake_lobby.response={"version":1,"id":"ABCDEF12","role":"client","retrySupported":true}
+ fake_lobby.complete_request.emit()
+ check(fake_lobby.room_id=="ABCDEF12" and fake_lobby.role=="client" and not fake_lobby.listing_busy,"Old list callback overwrote joined room")
+ fake_lobby.room_id="" # No real server membership in this fixture.
+ fake_lobby.close()
+ fake_lobby.active=true;fake_lobby.panel.show()
  # Discovering a room must not allocate a relay before a partner joins.
  fake_lobby.response = {"version":1,"id":"ABCDEF12","role":"host","retrySupported":true}
  fake_lobby.enter_room("create")

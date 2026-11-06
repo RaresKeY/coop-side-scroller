@@ -13,6 +13,8 @@ var refresh_button: Button
 var generation := 0
 var active := false
 var busy := false
+var listing_busy := false
+var directory_generation := 0
 var next_poll := 0
 var room_id := ""
 var seat := ""
@@ -156,12 +158,13 @@ func clear_rows():
   row.queue_free()
 
 func refresh():
- if not active or busy or room_id != "": return
- busy = true
+ if not active or busy or listing_busy or room_id != "": return
+ listing_busy = true
+ var directory_attempt = directory_generation
  var attempt = generation
  var result = await request_data({"action":"list"},attempt)
- if attempt != generation: return
- busy = false
+ if attempt != generation or directory_attempt != directory_generation: return
+ listing_busy = false
  next_poll = Time.get_ticks_msec()+5000
  if result.has("error"):
   hint.text = result.error + " · refreshing…" if int(result.get("status",0)) not in [401,403,429] else result.error
@@ -207,6 +210,10 @@ func enter_room(action: String, id: String = ""):
   hint.text = "Enter your player name (1–24 characters)"
   player_name_input.grab_focus()
   return
+ # Directory reads must not swallow a Join/Create click. Retire their UI
+ # callbacks before starting membership, including late errors from that read.
+ directory_generation += 1
+ listing_busy = false
  game.player_name = chosen_name
  hint.text = "Creating room…" if action == "create" else "Joining room…"
  busy = true
@@ -374,6 +381,8 @@ func close():
  var old_room = room_id
  var old_seat = seat
  generation += 1
+ directory_generation += 1
+ listing_busy = false
  epoch = 0
  retry_supported = false
  retry_requested = false

@@ -1,6 +1,6 @@
 # Player identity and chat
 
-Owners: `src/player_chat.gd`, reliable adapter RPC in `src/main.gd`, name entry in `src/private_lobby.gd`, inline Web input/observation in `adapters/web/ember_core_bridge.js`, `tests/player_chat.gd`, `tests/chat_network.gd` and browser checks.
+Owners: `src/player_chat.gd`, `src/speech_bubble.gd`, reliable adapter RPC in `src/main.gd`, name entry in `src/private_lobby.gd`, inline Web input/observation in `adapters/web/ember_core_bridge.js`, `tests/player_chat.gd`, `tests/chat_network.gd` and browser checks.
 
 ## Human input
 
@@ -8,7 +8,7 @@ Players choose names when creating/joining a room. Other players have name tags 
 
 ## Presentation
 
-The compact top-right panel preserves the scene and uses a charcoal translucent plate, readable text and a bounded scroll area. History retains the latest 100 messages. New messages follow the bottom only when the player was already there; reading older messages preserves scroll position. Names and messages are literal text, never markup. Speech plates last 4–10 seconds according to length, follow rendered actor positions, remain within the arena and separate when nearby players speak simultaneously. Other-player name tags follow the same rendered positions. The local yellow square replaces the earlier triangle without changing perspective-relative palettes.
+The compact top-right panel preserves the scene and uses a charcoal translucent plate, readable text and a bounded scroll area. History retains the latest 100 messages. New messages follow the bottom only when the player was already there; reading older messages preserves scroll position. Names and messages are literal text, never markup. Speech plates last 4–10 seconds according to length, follow rendered actor positions, remain within the arena and separate when nearby players speak simultaneously. Each speech plate has an off-center bottom triangle, dynamically aimed at the rendered speaker’s head after bubble placement. Tail length is bounded to24 arena units, stays within the plate’s horizontal span and is reserved during bubble separation. Body and tail share a single translucent outline, avoiding a darker join. If the speaker is above the bottom edge, the tail hides rather than pointing back through its own text. Other-player name tags follow the same rendered positions. The local yellow square replaces the earlier triangle without changing perspective-relative palettes.
 
 Names are trimmed, 1–24 Unicode code points; messages are trimmed, 1–200. ASCII/C1 controls and directional override/isolate controls reject. Native uses ordinary LineEdit input. Web uses a real inline browser input aligned over the engine composer for typing, IME and paste; Enter/ Escape finish the same session-owned callback. Reset closes and clears the DOM field, cancels its callback generation and clears session content. Chat composition suppresses movement/jump/attack independently of text focus. Menu/setup hides chat and cancels composition.
 

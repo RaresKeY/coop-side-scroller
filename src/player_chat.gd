@@ -1,6 +1,7 @@
 extends Node
 # Presentation/session metadata travels reliably beside opaque simulation bytes.
 # The portable movement core never receives names, chat text or UI state.
+const SpeechBubble = preload("res://src/speech_bubble.gd")
 const MAX_NAME := 24
 const MAX_TEXT := 200
 const MAX_HISTORY := 100
@@ -312,10 +313,10 @@ func append_message(id: int, slot: int, author: String, text: String):
  if follow: log_view.call_deferred("scroll_to_line",maxi(0,log_view.get_line_count()-1))
  else: scroll.set_deferred("value",saved)
  if bubbles.has(slot): bubbles[slot].node.queue_free()
- var bubble = PanelContainer.new()
+ var bubble = SpeechBubble.new()
  bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
  bubble.z_index = 20
- bubble.add_theme_stylebox_override("panel",plate(0.68))
+ bubble.configure(plate(0.68))
  var label = Label.new()
  label.text = text
  label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -359,7 +360,7 @@ func update_positions():
   if bubbles.has(slot):
    var bubble = bubbles[slot].node
    bubble.reset_size()
-   bubble.position = Vector2(clampf(feet.x-bubble.size.x/2,4,956-bubble.size.x),feet.y-102-bubble.size.y)
+   bubble.position = Vector2(clampf(feet.x-bubble.size.x/2,4,956-bubble.size.x),clampf(feet.y-102-bubble.size.y,4,maxf(4,536-bubble.size.y-SpeechBubble.TAIL_LENGTH)))
  for slot in bubbles.keys():
   if now_ms()>=bubbles[slot].until or not game.sprites.has(slot):
    bubbles[slot].node.queue_free()
@@ -372,7 +373,7 @@ func update_positions():
  slots.sort()
  for slot in slots:
   var bubble = bubbles[slot].node
-  var rect = bubble.get_rect()
+  var rect = bubble.footprint()
   for other in occupied:
    if not rect.grow(4).intersects(other): continue
    var options = [Vector2(rect.position.x,other.position.y-rect.size.y-8),Vector2(other.end.x+8,rect.position.y),Vector2(other.position.x-rect.size.x-8,rect.position.y)]
@@ -387,6 +388,9 @@ func update_positions():
    bubble.position = best
    rect.position = best
   occupied.append(rect)
+  var sprite = game.sprites[slot]
+  var feet = sprite.position + (Vector2(0,17) if sprite is Sprite2D else Vector2.ZERO)
+  bubble.point_to(feet+Vector2(0,-76)-bubble.position)
 
 func _process(_dt): update_positions()
 

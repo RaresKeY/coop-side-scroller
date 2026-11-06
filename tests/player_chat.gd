@@ -28,6 +28,20 @@ func make_game(role: String, chosen: String):
   var body = Node2D.new();body.position = Vector2(180 if slot==1 else 260,448)
   game.add_child(body);game.sprites[slot] = body
  return game
+func check_tail(chat, fixture, slot: int):
+ var bubble = chat.bubbles[slot].node
+ var points = bubble.tail_points()
+ check(points.size()==3,"Missing bottom speech triangle")
+ if points.size()!=3: return
+ var base = (points[0]+points[2])/2
+ var aim = fixture.sprites[slot].position+Vector2(0,-76)-bubble.position-base
+ var ray = points[1]-base
+ check(is_equal_approx(base.y,bubble.size.y),"Triangle detached from bubble bottom")
+ check(absf(base.x-(fixture.sprites[slot].position.x-bubble.position.x))>1,"Tail lost side offset")
+ check(ray.dot(aim)>0 and absf(ray.cross(aim))<0.02,"Tail does not point toward its rendered speaker")
+ check(ray.length()<=24.01 and points[1].y>base.y,"Tail length/direction escaped bounds")
+ for point in points: check(point.x>=0 and point.x<=bubble.size.x,"Tail escaped horizontal bounds")
+ check(bubble.footprint().position.y>=4 and bubble.footprint().end.y<=536,"Speech escaped arena")
 func _initialize(): call_deferred("run")
 func run():
  for bad in ["", "a".repeat(25),"bad\nname","bad"+String.chr(0x202e),42]:
@@ -66,6 +80,17 @@ func run():
  await process_frame;await process_frame
  hc.update_positions();gc.update_positions()
  check(not hc.bubbles[1].node.get_rect().intersects(hc.bubbles[2].node.get_rect()),"Nearby speech bubbles overlap")
+ check(not hc.bubbles[1].node.footprint().intersects(hc.bubbles[2].node.footprint()),"Tail overlaps another speech plate")
+ for fixture in [host,guest]:
+  var chat = hc if fixture==host else gc
+  for slot in [1,2]: check_tail(chat,fixture,slot)
+  # Exercise actual placement at both arena edges and while a speaker jumps.
+  for place in [Vector2(4,308),Vector2(956,448)]:
+   fixture.sprites[1].position=place
+   fixture.sprites[2].position=place+Vector2(-24 if place.x>480 else 24,0)
+   chat.update_positions()
+   for slot in [1,2]: check_tail(chat,fixture,slot)
+   check(not chat.bubbles[1].node.footprint().intersects(chat.bubbles[2].node.footprint()),"Stacked speech/tails overlap at an arena edge")
  var input = InputEventKey.new();input.pressed=true;input.keycode=KEY_ENTER
  gc._input(input)
  check(gc.composing and gc.entry.visible,"Enter did not focus chat")
@@ -84,8 +109,11 @@ func run():
  hc.clock+=1000;hc.submit("Keep reading older messages")
  await process_frame;await process_frame
  check(hc.log_view.get_v_scroll_bar().value<2,"Incoming chat stole scroll position")
+ var expired_bubble = weakref(hc.bubbles[1].node)
  hc.clock+=11000;gc.clock+=11000;hc.update_positions();gc.update_positions()
  check(hc.bubbles.is_empty() and gc.bubbles.is_empty(),"Speech bubbles did not expire")
+ await process_frame
+ check(expired_bubble.get_ref()==null,"Expired speech retained its drawn tail")
  gc.clear_session();hc.clear_session()
  check(gc.history.is_empty() and gc.names==["",""] and gc.session.is_empty() and gc.tags.is_empty(),"Session reset leaked identity/chat")
  host.free();guest.free()
