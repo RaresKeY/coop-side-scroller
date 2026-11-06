@@ -50,8 +50,15 @@ func run():
  check(state.x == 60.0 and game.players[1].x == 60.0,"rendering preserves authoritative players")
  game.update_sprites()
  check(sprite.local_ticks == 2 and sprite.age == 1,"fixed animation cadence survives high render frequency")
+ check(game.sprites[2].modulate == Color.WHITE and game.sprites[1].modulate == Color("8ed9ed"),"guest sees own colors unchanged and remote host tinted")
+ check(game.local_marker.visible and game.local_marker.position == Vector2(local_state.x,local_state.y-74),"triangle identifies the local guest")
+ game.mode = "host"
+ game.update_sprites()
+ check(game.sprites[1].modulate == Color.WHITE and game.sprites[2].modulate == Color("8ed9ed"),"host sees own colors unchanged and remote guest tinted")
+ check(game.local_marker.position == Vector2(state.x,state.y-74),"triangle follows local host when perspective changes")
  game.reset_network()
  check(game.snapshot_interpolator._frames.is_empty(),"real session reset clears interpolation history")
+ check(not game.local_marker.visible,"session reset hides the local triangle")
  game.queue_free()
  await process_frame
  print("Snapshot presentation integration PASS: ",checks," checks")

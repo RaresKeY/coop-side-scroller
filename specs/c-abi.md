@@ -1,8 +1,8 @@
 # C ABI and message contract, version 1.0
 
-Source of truth: `core/include/ember_core.h`. Symbol prefix is `ec_v1_`; ABI value is `0x00010000`, protocol version is independently 1. `create` requires the exact ABI version. Future incompatible layouts/protocols require a new version, not reinterpretation of existing messages.
+Source of truth: `core/include/ember_core.h`. Symbol prefix is `ec_v1_`; ABI value is `0x00010000`, protocol version is independently 2. `create` requires the exact ABI version. Future incompatible layouts/protocols require a new version, not reinterpretation of existing messages.
 
-`core/include/ember_deterministic.h` adds separate opaque handles and `ec_v1_deterministic_*` functions using the same ABI value and copied view/event layouts. Its `EDI1` input packets and `EDC1` checkpoints never enter `ec_v1_receive`; see [the experimental contract](deterministic-coop.md). The existing role values, numeric bridge and `EC01` wire layouts below retain their meanings.
+`core/include/ember_deterministic.h` adds separate opaque handles and `ec_v1_deterministic_*` functions using the same ABI value and copied view/event layouts. Its `EDI1` input packets and `EDC1` checkpoints never enter `ec_v1_receive`; see [the experimental contract](deterministic-coop.md). Role values and numeric operations remain compatible. Shipping messages now use `EC02`; old `EC01` gameplay is rejected. Both peers must reload. The deterministic experiment retains its separate `EDI1`/`EDC1` formats.
 
 ## Calls and ownership
 
@@ -16,20 +16,20 @@ All arguments and fields use uint32_t/int32_t, uint8_t buffers, an opaque EC_Han
 | `reset(handle,role,local_slot)` | Clears state/queues/sequences and reconfigures an existing owned handle. Host starts with slot 1; replica has no actors until a snapshot. |
 | `set_local_input(handle,axis,flags)` | Axis [-1000,1000], jump bit 0, attack bit 1; unknown bits/values reject. No player identity in this call; it affects only the handle's configured local slot. |
 | `set_peer_active(handle,2,active)` | Host-only membership; active must be 0 or 1. |
-| `tick(handle)` | One fixed host tick or one replica input-emission tick. |
-| `receive(handle,sender_slot,bytes,size)` | Borrows bytes only for this call; never retains caller pointers. Adapter authenticates sender_slot. Maximum size 104; exact type lengths, fields and authority are validated before state mutation. Rejections increment a diagnostic counter. |
+| `tick(handle)` | One fixed host tick or one replica input-emission/prediction tick. |
+| `receive(handle,sender_slot,bytes,size)` | Borrows bytes only for this call; never retains caller pointers. Adapter authenticates sender_slot. Maximum size 112; exact type lengths, fields and authority are validated before state mutation. Rejections increment a diagnostic counter. |
 | `next_message(handle,buffer,capacity,&size)` | Copies one outbound message into caller memory, then consumes it. Too-small/NULL buffer reports required size without consuming. Empty returns EC_EMPTY and size 0. Messages are gameplay payloads, with no transport framing. |
 | `next_event(handle,&event)` | Copies and consumes one event; EC_EMPTY if none. Poll and route to your own callbacks. |
-| `read_view(handle,&view,capacity)` | Copies current state; capacity must be at least sizeof(EC_View). Caller memory must be valid and naturally aligned. |
+| `read_view(handle,&view,capacity)` | Copies current presented state (predicted local replica actor, authoritative remote actor/HP); capacity must be at least sizeof(EC_View). Caller memory must be valid and naturally aligned. |
 | `reset_dummy(handle)` | Host-only prototype/debug action. |
 
 Status values: EC_OK=0, EC_EMPTY=1, invalid handle=-1, invalid argument=-2, authority=-3, malformed message=-4, stale sequence=-5, capacity=-6. Exported functions do not throw. External callers are responsible for valid accessible pointer buffers, correct capacities, handle lifetime and external serialization. Handles and creation/destruction are not thread-safe. Do not invoke a handle concurrently or recursively while a core call is active. Event/message callbacks are adapter-owned, after a completed call.
 
 ## Wire serialization
 
-Every multibyte field is exactly 32 bits, **little-endian**; signed fields use two's-complement encoding. There is no native packing, padding, floating-point field or object serialization. Header bytes 0..3 are ASCII `EC01` (wire version 1), type at offset 4 and uint32 message sequence at offset 8. No checksum/MAC is supplied; transport security belongs outside this library.
+Every multibyte field is exactly 32 bits, **little-endian**; signed fields use two's-complement encoding. There is no native packing, padding, floating-point field or object serialization. Header bytes 0..3 are ASCII `EC02` (wire version 2), type at offset 4 and uint32 message sequence at offset 8. No checksum/MAC is supplied; transport security belongs outside this library.
 
-Input type 1, exactly **24 bytes**:
+Input type 1, exactly **32 bytes**:
 
 | Offset | Field |
 | --- | --- |
@@ -37,8 +37,9 @@ Input type 1, exactly **24 bytes**:
 | 12 | Source slot, exactly 2; authenticated sender must also be 2 |
 | 16 | int32 axis milli-input |
 | 20 | uint32 held flags |
+| 24 / 28 | uint32 cumulative jump / attack press counters |
 
-Snapshot type 2, exactly **104 bytes**:
+Snapshot type 2, exactly **112 bytes**:
 
 | Offset | Field |
 | --- | --- |
@@ -47,8 +48,12 @@ Snapshot type 2, exactly **104 bytes**:
 | 16 | uint32 dummy HP [0,12] |
 | 20 | uint32 slot record count, exactly 2 |
 | 24 / 64 | Slot 1 / slot 2 record, each 40 bytes |
+| 104 | uint32 last applied guest input sequence (zero if no ACK) |
+| 108 | bit 0: host held-jump edge memory; bit 1: ACK present; other bits reject |
 
 Each slot record contains, in order at +0,+4,…,+36: slot ID, active, signed x, signed y, signed vy, signed facing, attack ticks, attack ID, animation enum, grounded. Inactive slots retain their ID but do not render. Active coordinates/velocity, facing ±1, boolean fields, cooldown ≤24 and animation [0,4] are range-checked. Snapshots from sender slots other than 1 reject at a replica, and hosts never apply snapshots.
+
+ACKs cannot exceed the replica's generated input sequence once it has sent input. A nonzero ACK without its presence flag, unknown flag bits and wrong sizes reject atomically. Bootstrapping before local input accepts the trusted host baseline. [Local prediction](local-prediction.md) owns bounded replay and effect separation.
 
 The input and snapshot sequence spaces are independent. Messages are idempotent by sequence rejection; a transport may reorder/drop them. The test/reference transport uses ordered unreliable delivery and periodic full snapshots. Events are not a separately reliable network stream.
 
@@ -62,7 +67,7 @@ The input and snapshot sequence spaces are independent. Messages are idempotent 
 | 1 | Set local input: a=axis, b=flags |
 | 2 | Fixed tick |
 | 3 | Set remote membership: a=2, b=active |
-| 4/5/6 | Begin receive (a=authenticated slot,b=size), write each byte (a=index,b=byte), finish receive. Write all bytes before finish; duplicate writes do not count as missing bytes. Incomplete finish rejects, and every finish consumes the stage. Begin requires 12–104 bytes and invalidates any previous stage even on error; stage is per handle. |
+| 4/5/6 | Begin receive (a=authenticated slot,b=size), write each byte (a=index,b=byte), finish receive. Write all bytes before finish; duplicate writes do not count as missing bytes. Incomplete finish rejects, and every finish consumes the stage. Begin requires 12–112 bytes and invalidates any previous stage even on error; stage is per handle. |
 | 7/8/9 | Peek outgoing size, read outgoing byte at a, consume outgoing message |
 | 10 | Read view field a, actor slot b where needed |
 | 11 | Host reset dummy |

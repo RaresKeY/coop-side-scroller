@@ -1,7 +1,7 @@
 extends RefCounted
 # This envelope versions the adapter handshake, independently of gameplay bytes.
 const VERSION := 1
-const PROTOCOL := 1
+const PROTOCOL := 2
 const MAX_CODE := 65536
 
 static func encode(data: Dictionary) -> String:

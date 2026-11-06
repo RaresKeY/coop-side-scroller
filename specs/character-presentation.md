@@ -12,9 +12,11 @@ Attack artwork crosses nominal cell boundaries. Old uniform slicing cropped fram
 
 Attack's body anchor is source cell x=76, feet y=111, removing its unwanted 12-pixel body translation relative to idle. Offset is computed from the actual rectangle size, and mirrored offsets preserve the same world anchor in both directions. No recentering by bounding box occurs at runtime; that would make sword motion drag the body around.
 
+Each view preserves original colors for its own actor and tints the other cyan. A gold downward triangle identifies the local actor, positioned above its head and hidden during session reset. Identity is perspective-relative, not permanently tied to host/guest slot colors.
+
 ## Automatic timing
 
-The core still supplies logical idle/run/jump/attack/walk states, attack ID/cooldown and grounded/velocity state. The renderer owns frame selection and presentation follow-through; it never computes authority, damage or player movement. No animation-selection UI has been added.
+The core supplies logical idle/run/jump/attack/walk states, attack ID/cooldown and grounded/velocity state. Replica-local values are [predicted](local-prediction.md) for immediate feedback; shared effects remain confirmed. The renderer owns frame selection and presentation follow-through; it never computes authority, damage or player movement. No animation-selection UI has been added.
 
 The Godot adapter presents once per 60 Hz physics callback. Idle breathes at 6 fps, walk plays at 12 fps and run at 24 fps. Attack uses all five frames across the existing 24 ticks, with durations **3/5/3/4/9 ticks**: anticipation, lift, apex, downstroke and contact/recovery. C++ applies damage once at age 15 ticks (250 ms), when the blade reaches the dummy, rather than on the first anticipation frame. Repeated held attacks retain the 24-tick cadence. Frame timing is renderer-owned; hit eligibility is core-owned.
 

@@ -5,7 +5,7 @@ const { module, instance } = await WebAssembly.instantiate(bytes, {});
 const check = (condition, message) => { if (!condition) throw new Error(message); };
 check(WebAssembly.Module.imports(module).length === 0, 'Wasm must have no imports');
 const api = instance.exports;
-check(api.ec_v1_abi_version() === 0x10000 && api.ec_v1_protocol_version() === 1, 'version mismatch');
+check(api.ec_v1_abi_version() === 0x10000 && api.ec_v1_protocol_version() === 2, 'version mismatch');
 check(api.ec_v1_create(0,1,1) === 0, 'incompatible ABI accepted');
 const host = api.ec_v1_create(0x10000,1,1), guest = api.ec_v1_create(0x10000,2,2);
 check(host && guest, 'handle allocation');
@@ -67,5 +67,17 @@ cmd(host,3,2,0);snapshot();events(0,1,0);
 cmd(host,3,2,1);snapshot();events(1,0,0);
 attack();snapshot();events(0,0,1);
 cmd(guest,0,2,2);snapshot();events(1,0,1);
+// Local movement and logical animation advance without waiting for a snapshot.
+cmd(host,0,1,1);cmd(host,3,2,1);cmd(guest,0,2,2);snapshot();
+for (let i=0;i<60;i++) {
+ const x=cmd(guest,10,3,2), oldHost=cmd(host,10,3,2);
+ cmd(guest,1,1000,i<45?1:0);cmd(guest,2);
+ check(cmd(guest,10,3,2)===Math.min(936000,x+2833),'immediate Wasm local prediction');
+ check(cmd(host,10,3,2)===oldHost,'prediction mutated host authority');
+ if(i===0)check(cmd(guest,10,9,2)===2,'jump animation waited for authority');
+ transfer(guest,host,2);cmd(host,2);transfer(host,guest,1);
+ check(cmd(guest,10,3,2)===cmd(host,10,3,2),'Wasm reconciliation position');
+ check(cmd(guest,10,4,2)===cmd(host,10,4,2),'Wasm reconciliation jump memory');
+}
 api.ec_v1_destroy(guest);api.ec_v1_destroy(host);
 console.log('Wasm ABI + native parity PASS', result);

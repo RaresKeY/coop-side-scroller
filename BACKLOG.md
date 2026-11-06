@@ -42,7 +42,7 @@ Remaining integration work:
 
 - **Player chat (requested):** add multiplayer text chat with messages appearing in an RPG-style chat window and above the sending player's character on a transparent backplate.
 
-- Add local guest prediction/reconciliation. Remote-actor position interpolation is implemented in the Godot adapter; the local guest still uses authoritative snapshots. See [presentation bounds](specs/snapshot-presentation.md).
+- Local guest prediction/reconciliation and remote-actor interpolation are implemented. Evaluate actual correction quality under loss and broader human latency acceptance. See [prediction bounds](specs/local-prediction.md) and [presentation bounds](specs/snapshot-presentation.md).
 - Evaluate reliable gameplay event IDs/acknowledgements, action-tick reconciliation and prolonged loss handling. Existing input/snapshot sequencing does not make events a reliable stream.
 - Integrate real level collision, enemies and game-specific movement through explicit core/adapter contracts. This prototype is not a drop-in multiplayer retrofit for another game.
 - Add Unity/Unreal/custom-engine and additional OS adapters only against concrete target requirements. Current integration guidance is not implementation evidence.

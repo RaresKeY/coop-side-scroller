@@ -35,7 +35,7 @@ func peer_active(active: bool):
  drain_events()
 
 func receive_message(sender_slot: int, bytes: PackedByteArray) -> int:
- if bytes.size() > 104: return -4
+ if bytes.size() > 112: return -4
  if command(4,sender_slot,bytes.size()) != 0: return -4
  for index in bytes.size(): command(5,index,bytes[index])
  var result = command(6)

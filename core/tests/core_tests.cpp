@@ -43,9 +43,94 @@ static void rejoin_events() {
   ec_v1_reset(r,2,2);snapshot();events(1,0,1);
   ec_v1_destroy(h);ec_v1_destroy(r);
 }
+
+static void prediction_contracts() {
+  auto *h=ec_v1_create(EC_ABI_V1,1,1), *g=ec_v1_create(EC_ABI_V1,2,2);
+  assert(h&&g);ec_v1_set_peer_active(h,2,1);
+  uint8_t b[EC_MAX_MESSAGE]{}, delayed[EC_MAX_MESSAGE]{};uint32_t size=0;
+  auto receive_latest=[&]() {
+    while(ec_v1_next_message(h,b,sizeof b,&size)==EC_OK)
+      assert(ec_v1_receive(g,1,b,size)==EC_OK);
+  };
+  for(int i=0;i<3;++i)ec_v1_tick(h);
+  receive_latest();
+  for(int i=0;i<60;++i) {
+    auto prior=view(g);auto authority=view(h);
+    ec_v1_set_local_input(g,1000,i<45?EC_INPUT_JUMP:0);
+    ec_v1_tick(g);auto predicted=view(g);
+    assert(predicted.players[1].x==prior.players[1].x+2833);
+    assert(view(h).players[1].x==authority.players[1].x);
+    if(!i)assert(predicted.players[1].y<448000 && predicted.players[1].animation==EC_ANIM_JUMP);
+    size=drain(g,b);assert(ec_v1_receive(h,2,b,size)==EC_OK);ec_v1_tick(h);
+    receive_latest();
+    assert(view(g).players[1].x==view(h).players[1].x);
+    assert(view(g).players[1].y==view(h).players[1].y);
+  }
+  assert(view(g).players[1].grounded); // Held jump did not restart at reconciliation.
+  // Delay a real snapshot while newer local input continues. ACKed frames
+  // disappear; the unacknowledged suffix replays exactly once.
+  ec_v1_set_local_input(g,-1000,0);
+  for(int i=0;i<6;++i) {
+    ec_v1_tick(g);size=drain(g,b);assert(ec_v1_receive(h,2,b,size)==EC_OK);ec_v1_tick(h);
+    while(ec_v1_next_message(h,b,sizeof b,&size)==EC_OK)
+      if(i==2)std::memcpy(delayed,b,size);
+  }
+  auto before=view(g);
+  assert(ec_v1_receive(g,1,delayed,sizeof delayed)==EC_OK);
+  assert(view(g).players[1].x==before.players[1].x);
+  assert(ec_v1_receive(g,1,delayed,sizeof delayed)==EC_ERR_STALE);
+  auto put=[](uint8_t *p,uint32_t n){for(int i=0;i<4;++i)p[i]=uint8_t(n>>(i*8));};
+  delayed[8]++;put(delayed+104,67); // Only 66 local inputs have been produced.
+  assert(ec_v1_receive(g,1,delayed,sizeof delayed)==EC_ERR_MESSAGE);
+  assert(view(g).players[1].x==before.players[1].x);
+  put(delayed+104,63);put(delayed+108,4);
+  assert(ec_v1_receive(g,1,delayed,sizeof delayed)==EC_ERR_MESSAGE);
+  put(delayed+108,2);put(delayed+72,700000);
+  assert(ec_v1_receive(g,1,delayed,sizeof delayed)==EC_OK);
+  assert(view(g).players[1].x==700000-3*2833); // Correction plus pending inputs.
+  delayed[3]='1';delayed[8]++;
+  assert(ec_v1_receive(g,1,delayed,sizeof delayed)==EC_ERR_MESSAGE);
+  // Prediction is bounded during an outage and never causes confirmed damage.
+  EC_Event confirmed{};while(ec_v1_next_event(g,&confirmed)==EC_OK){}
+  ec_v1_set_local_input(g,0,EC_INPUT_ATTACK);
+  for(int i=0;i<128;++i){ec_v1_tick(g);drain(g,b);}
+  auto frozen=view(g);
+  for(int i=0;i<100;++i){ec_v1_tick(g);drain(g,b);}
+  assert(view(g).players[1].attack_ticks==frozen.players[1].attack_ticks);
+  assert(view(g).enemy_hp==view(h).enemy_hp);
+  assert(ec_v1_next_event(g,&confirmed)==EC_EMPTY);
+  // A fresh authoritative view clears exhausted speculation, then input
+  // responds again on its next fixed tick.
+  for(int i=0;i<3;++i)ec_v1_tick(h);
+  receive_latest();
+  auto resumed=view(g);ec_v1_set_local_input(g,-1000,0);ec_v1_tick(g);
+  assert(view(g).players[1].x==resumed.players[1].x-2833);
+  // A tap's press packet may be lost, or superseded before the host ticks.
+  for(int lost=0;lost<2;++lost) {
+    ec_v1_reset(h,1,1);ec_v1_set_peer_active(h,2,1);ec_v1_reset(g,2,2);
+    ec_v1_set_local_input(g,0,EC_INPUT_JUMP|EC_INPUT_ATTACK);ec_v1_tick(g);size=drain(g,b);
+    if(!lost)assert(ec_v1_receive(h,2,b,size)==EC_OK);
+    ec_v1_set_local_input(g,0,0);ec_v1_tick(g);size=drain(g,b);
+    assert(ec_v1_receive(h,2,b,size)==EC_OK);ec_v1_tick(h);
+    assert(view(h).players[1].y<448000 && view(h).players[1].attack_id==1);
+    assert(ec_v1_receive(h,2,b,size)==EC_ERR_STALE);
+    for(int i=0;i<60;++i)ec_v1_tick(h);
+    assert(view(h).players[1].grounded && view(h).players[1].attack_id==1);
+  }
+  ec_v1_reset(h,1,1);ec_v1_set_peer_active(h,2,1);ec_v1_reset(g,2,2);
+  ec_v1_tick(g);size=drain(g,b);put(b+24,UINT32_MAX);put(b+28,UINT32_MAX);
+  assert(ec_v1_receive(h,2,b,size)==EC_OK);ec_v1_tick(h);
+  for(int i=0;i<60;++i)ec_v1_tick(h);
+  put(b+8,2);put(b+24,0);put(b+28,0);
+  assert(ec_v1_receive(h,2,b,size)==EC_OK);ec_v1_tick(h);
+  assert(view(h).players[1].attack_id==2 && !view(h).players[1].grounded);
+  ec_v1_destroy(g);ec_v1_destroy(h);
+}
+
 int main() {
+  prediction_contracts();
   rejoin_events();
-  assert(ec_v1_abi_version() == EC_ABI_V1 && ec_v1_protocol_version() == 1);
+  assert(ec_v1_abi_version() == EC_ABI_V1 && ec_v1_protocol_version() == 2);
   assert(!ec_v1_create(0, 1, 1) && !ec_v1_create(EC_ABI_V1, 2, 1));
   auto *host = ec_v1_create(EC_ABI_V1, 1, 1);
   auto *guest = ec_v1_create(EC_ABI_V1, 2, 2);
@@ -61,10 +146,10 @@ int main() {
   ec_v1_set_local_input(guest, 1000, EC_INPUT_JUMP);
   ec_v1_tick(guest);
   assert(ec_v1_next_message(guest, bytes, 1, &size) == EC_ERR_CAPACITY &&
-         size == 24);
+         size == 32);
   assert(ec_v1_next_message(guest, bytes, sizeof bytes, &size) == EC_OK &&
-         size == 24);
-  assert(bytes[0] == 'E' && bytes[3] == '1' && bytes[4] == 1 &&
+         size == 32);
+  assert(bytes[0] == 'E' && bytes[3] == '2' && bytes[4] == 1 &&
          bytes[16] == 0xe8 && bytes[17] == 3);
   assert(ec_v1_receive(host, 1, bytes, size) == EC_ERR_AUTHORITY);
   assert(ec_v1_receive(host, 2, bytes, size - 1) == EC_ERR_MESSAGE);
@@ -89,7 +174,7 @@ int main() {
     std::memcpy(latest, bytes, size);
     last_size = size;
   }
-  assert(last_size == 104);
+  assert(last_size == 112);
   assert(ec_v1_receive(guest, 2, latest, last_size) == EC_ERR_AUTHORITY);
   assert(ec_v1_receive(guest, 1, latest, last_size) == EC_OK);
   auto before = view(guest);
@@ -126,7 +211,7 @@ int main() {
   assert(ec_v1_command(host, 6, 0, 0) == EC_ERR_MESSAGE);
   assert(ec_v1_receive(host, 2, bytes, size) == EC_OK);
   assert(ec_v1_command(host, 4, 2, size) == EC_OK);
-  assert(ec_v1_command(host, 4, 2, 105) == EC_ERR_ARGUMENT);
+  assert(ec_v1_command(host, 4, 2, 113) == EC_ERR_ARGUMENT);
   assert(ec_v1_command(host, 5, 0, 0) == EC_ERR_ARGUMENT);
   assert(ec_v1_command(host, 6, 0, 0) == EC_ERR_MESSAGE);
   // Sequence comparison accepts wraparound, but not a reordered prior packet.

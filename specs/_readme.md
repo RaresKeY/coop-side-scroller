@@ -13,6 +13,7 @@ Start with [current architecture](architecture.md): portable C++ core, Godot nat
 | [Deterministic co-op experiment](deterministic-coop.md) | `core/include/ember_deterministic.h`, `core/src/ember_deterministic.cpp`, `tools/deterministic_lab.py`, typed Web adapter | Comparing lockstep/rollback, complete checkpoints, input history and no-game-server recovery |
 | [Builds and targets](build-targets.md) | `CMakeLists.txt`, `tools/build_core.py`, `tests/`, `vendored/` | Building/testing or assessing tested platform support |
 | [Prototype](prototype.md) | `src/main.gd`, `project.godot`, `main.tscn` | Changing gameplay, menus, animation or transport |
+| [Local prediction](local-prediction.md) | `core/src/ember_core.cpp`, `src/main.gd`, prediction/identity tests | Changing immediate local feedback, ACK/replay bounds, tap retention or per-view identity |
 | [Snapshot presentation](snapshot-presentation.md) | `src/snapshot_interpolator.gd`, `src/main.gd`, snapshot tests | Changing remote interpolation, session reset or render/pose clocks |
 | [Character presentation](character-presentation.md) | `src/character_view.gd`, `shaders/`, animation captures/tests | Changing sprite size, anchors, atlas slicing, frame timing or sampling |
 | [Browser connection](browser-connection.md) | `src/connection_codes.gd`, WebRTC in `src/main.gd`, `adapters/web/ember_core_bridge.js`, `tests/connections.sh` | Changing browser pairing, TLS compatibility routing, validation, timeouts or assessing internet/NAT requirements |

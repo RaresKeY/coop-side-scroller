@@ -6,7 +6,8 @@ static_assert(sizeof(EC_View) == 116, "C ABI view layout");
 static_assert(sizeof(EC_Event) == 16, "C ABI event layout");
 
 namespace {
-constexpr uint32_t MESSAGE_CAP = 64, EVENT_CAP = 64, SNAPSHOT_SIZE = 104;
+constexpr uint32_t MESSAGE_CAP = 64, EVENT_CAP = 64, SNAPSHOT_SIZE = 112, PREDICTION_CAP = 128;
+struct PredictedInput { uint32_t sequence; ember_sim::Input input; };
 struct Message {
   uint32_t size;
   uint8_t bytes[EC_MAX_MESSAGE];
@@ -21,7 +22,12 @@ struct EC_Handle {
   bool live;
   uint32_t role, local_slot, tick, input_sequence, snapshot_sequence;
   uint32_t last_snapshot, rejected, dropped_events, dropped_messages, enemy_hp;
-  bool snapshot_seen;
+  bool snapshot_seen, input_sent, applied_seen, prediction_overflow;
+  uint32_t local_jump_serial, local_attack_serial, remote_jump_serial, remote_attack_serial;
+  bool jump_pending, attack_pending;
+  uint32_t applied_sequence, predicted_jump, prediction_head, prediction_count;
+  EC_Player predicted_player;
+  PredictedInput prediction[PREDICTION_CAP];
   EC_Player players[2];
   Input inputs[2];
   uint32_t held_jump[2];
@@ -77,7 +83,7 @@ Message *message(EC_Handle *h, uint32_t size, uint32_t type, uint32_t seq) {
   m->bytes[0] = 'E';
   m->bytes[1] = 'C';
   m->bytes[2] = '0';
-  m->bytes[3] = '1';
+  m->bytes[3] = '2';
   put(m->bytes + 4, type);
   put(m->bytes + 8, seq);
   return m;
@@ -88,7 +94,48 @@ void spawn(EC_Handle *h, uint32_t index) {
       EC_ANIM_IDLE, 1};
   h->inputs[index] = {0, 0, 0, h->tick, false};
   h->held_jump[index] = 0;
+  if (index == 1) {
+    h->applied_sequence = h->remote_jump_serial = h->remote_attack_serial = 0;
+    h->applied_seen = h->jump_pending = h->attack_pending = false;
+  }
   emit(h, EC_EVENT_JOIN, index + 1, 0);
+}
+// Reuse the exact shared movement/animation rules without speculative world
+// effects. Replica authority and confirmed event generation stay untouched.
+void predict_input(EC_Handle *h, ember_sim::Input input) {
+  struct LocalWorld {
+    uint32_t tick = 0, enemy_hp = 0;
+    EC_Player players[2]{};
+    uint32_t held_jump[2]{};
+  } world;
+  world.players[1] = h->predicted_player;
+  world.held_jump[1] = h->predicted_jump;
+  ember_sim::Input inputs[2] = {{}, input};
+  ember_sim::step(world, inputs, [](uint32_t, uint32_t, uint32_t) {});
+  h->predicted_player = world.players[1];
+  h->predicted_jump = world.held_jump[1];
+}
+void reconcile(EC_Handle *h, uint32_t acknowledged, uint32_t flags,
+               bool previously_active) {
+  if (!previously_active || !h->players[1].active || h->prediction_overflow) {
+    h->prediction_head = h->prediction_count = 0;
+    h->prediction_overflow = false;
+  } else if (flags & 2u) {
+    while (h->prediction_count &&
+           !newer(h->prediction[h->prediction_head].sequence, acknowledged)) {
+      h->prediction_head = (h->prediction_head + 1) % PREDICTION_CAP;
+      --h->prediction_count;
+    }
+  }
+  h->predicted_player = h->players[1];
+  h->predicted_jump = flags & 1u;
+  if (!h->players[1].active) return;
+  for (uint32_t i = 0; i < h->prediction_count; ++i)
+    predict_input(h, h->prediction[(h->prediction_head + i) % PREDICTION_CAP].input);
+}
+const EC_Player &presented_player(EC_Handle *h, uint32_t index) {
+  return h->role == EC_ROLE_REPLICA && index == 1 && h->players[1].active
+      ? h->predicted_player : h->players[index];
 }
 void write_snapshot(EC_Handle *h) {
   auto *m = message(h, SNAPSHOT_SIZE, 2, ++h->snapshot_sequence);
@@ -97,6 +144,8 @@ void write_snapshot(EC_Handle *h) {
   put(m->bytes + 12, h->tick);
   put(m->bytes + 16, h->enemy_hp);
   put(m->bytes + 20, 2);
+  put(m->bytes + 104, h->applied_seen ? h->applied_sequence : 0);
+  put(m->bytes + 108, h->held_jump[1] | (h->applied_seen ? 2u : 0u));
   for (uint32_t i = 0; i < 2; i++) {
     const auto &p = h->players[i];
     auto *b = m->bytes + 24 + i * 40;
@@ -119,7 +168,7 @@ int32_t reject(EC_Handle *h, int32_t code) {
 } // namespace
 extern "C" {
 uint32_t ec_v1_abi_version(void) { return EC_ABI_V1; }
-uint32_t ec_v1_protocol_version(void) { return EC_PROTOCOL_V1; }
+uint32_t ec_v1_protocol_version(void) { return EC_PROTOCOL_VERSION; }
 EC_Handle *ec_v1_create(uint32_t abi, uint32_t role, uint32_t local) {
   if (abi != EC_ABI_V1 || (role != EC_ROLE_HOST && role != EC_ROLE_REPLICA) ||
       local != role)
@@ -158,6 +207,10 @@ int32_t ec_v1_set_local_input(EC_Handle *h, int32_t axis, uint32_t flags) {
   if (axis < -1000 || axis > 1000 || flags > 3)
     return EC_ERR_ARGUMENT;
   auto &in = h->inputs[h->local_slot - 1];
+  if (h->role == EC_ROLE_REPLICA) {
+    if ((flags & EC_INPUT_JUMP) && !(in.flags & EC_INPUT_JUMP)) ++h->local_jump_serial;
+    if ((flags & EC_INPUT_ATTACK) && !(in.flags & EC_INPUT_ATTACK)) ++h->local_attack_serial;
+  }
   in.axis = axis;
   in.flags = flags;
   in.at = h->tick;
@@ -184,13 +237,31 @@ int32_t ec_v1_tick(EC_Handle *h) {
     return EC_ERR_HANDLE;
   if (h->role == EC_ROLE_REPLICA) {
     const auto &in = h->inputs[1];
-    auto *m = message(h, 24, 1, ++h->input_sequence);
+    ++h->input_sequence;
+    h->input_sent = true;
+    if (h->players[1].active && !h->prediction_overflow) {
+      if (h->prediction_count == PREDICTION_CAP) {
+        // A long outage freezes speculation until a fresh authoritative view.
+        h->prediction_overflow = true;
+      } else {
+        h->prediction[(h->prediction_head + h->prediction_count++) % PREDICTION_CAP] =
+            {h->input_sequence, {in.axis, in.flags}};
+        predict_input(h, {in.axis, in.flags});
+      }
+    }
+    auto *m = message(h, 32, 1, h->input_sequence);
     if (m) {
       put(m->bytes + 12, 2);
       put(m->bytes + 16, uint32_t(in.axis));
       put(m->bytes + 20, in.flags);
+      put(m->bytes + 24, h->local_jump_serial);
+      put(m->bytes + 28, h->local_attack_serial);
     }
     return EC_OK;
+  }
+  if (h->players[1].active && h->inputs[1].seen) {
+    h->applied_sequence = h->inputs[1].sequence;
+    h->applied_seen = true;
   }
   ember_sim::Input frame_inputs[2];
   for (uint32_t i = 0; i < 2; ++i) {
@@ -198,6 +269,11 @@ int32_t ec_v1_tick(EC_Handle *h) {
     if (i && h->tick + 1 - in.at > 18) in = {};
     frame_inputs[i] = {in.axis, in.flags};
   }
+  // Preserve taps even when press/release packets are coalesced before a host
+  // tick or the press packet is lost. Counters are cumulative and modular.
+  if (h->jump_pending) { h->held_jump[1] = 0; frame_inputs[1].flags |= EC_INPUT_JUMP; }
+  if (h->attack_pending) frame_inputs[1].flags |= EC_INPUT_ATTACK;
+  h->jump_pending = h->attack_pending = false;
   ember_sim::step(*h, frame_inputs, [h](uint32_t type, uint32_t slot, uint32_t value) {
     emit(h, type, slot, value);
   });
@@ -210,13 +286,13 @@ int32_t ec_v1_receive(EC_Handle *h, uint32_t sender, const uint8_t *b,
   if (!valid(h))
     return EC_ERR_HANDLE;
   if (!b || size < 12 || size > EC_MAX_MESSAGE || b[0] != 'E' || b[1] != 'C' ||
-      b[2] != '0' || b[3] != '1')
+      b[2] != '0' || b[3] != '2')
     return reject(h, EC_ERR_MESSAGE);
   uint32_t type = get(b + 4), seq = get(b + 8);
   if (type == 1) {
     if (h->role != EC_ROLE_HOST || sender != 2)
       return reject(h, EC_ERR_AUTHORITY);
-    if (size != 24 || get(b + 12) != 2 || !h->players[1].active)
+    if (size != 32 || get(b + 12) != 2 || !h->players[1].active)
       return reject(h, EC_ERR_MESSAGE);
     int32_t axis = signed_get(b + 16);
     uint32_t flags = get(b + 20);
@@ -225,6 +301,12 @@ int32_t ec_v1_receive(EC_Handle *h, uint32_t sender, const uint8_t *b,
     auto &in = h->inputs[1];
     if (in.seen && !newer(seq, in.sequence))
       return reject(h, EC_ERR_STALE);
+    if ((!in.seen && get(b + 24)) || newer(get(b + 24), h->remote_jump_serial)) {
+      h->remote_jump_serial = get(b + 24); h->jump_pending = true;
+    }
+    if ((!in.seen && get(b + 28)) || newer(get(b + 28), h->remote_attack_serial)) {
+      h->remote_attack_serial = get(b + 28); h->attack_pending = true;
+    }
     in = {axis, flags, seq, h->tick, true};
     return EC_OK;
   }
@@ -234,6 +316,10 @@ int32_t ec_v1_receive(EC_Handle *h, uint32_t sender, const uint8_t *b,
     return reject(h, EC_ERR_MESSAGE);
   if (h->snapshot_seen && !newer(seq, h->last_snapshot))
     return reject(h, EC_ERR_STALE);
+  uint32_t acknowledged = get(b + 104), prediction_flags = get(b + 108);
+  if (prediction_flags > 3 || (!(prediction_flags & 2u) && acknowledged) ||
+      ((prediction_flags & 2u) && h->input_sent && newer(acknowledged, h->input_sequence)))
+    return reject(h, EC_ERR_MESSAGE);
   EC_Player pending[2]{};
   for (uint32_t i = 0; i < 2; i++) {
     auto *s = b + 24 + i * 40;
@@ -255,6 +341,7 @@ int32_t ec_v1_receive(EC_Handle *h, uint32_t sender, const uint8_t *b,
         p.attack_ticks > 24 || p.animation > EC_ANIM_WALK || p.grounded > 1)
       return reject(h, EC_ERR_MESSAGE);
   }
+  bool previously_active = h->players[1].active != 0;
   uint32_t previous_hp = h->enemy_hp;
   h->tick = get(b + 12);
   h->enemy_hp = get(b + 16);
@@ -275,6 +362,7 @@ int32_t ec_v1_receive(EC_Handle *h, uint32_t sender, const uint8_t *b,
   }
   if (h->enemy_hp < previous_hp)
     emit(h, EC_EVENT_DAMAGE, 0, h->enemy_hp);
+  reconcile(h, acknowledged, prediction_flags, previously_active);
   h->last_snapshot = seq;
   h->snapshot_seen = true;
   h->snapshot_sequence = seq;
@@ -324,7 +412,7 @@ int32_t ec_v1_read_view(EC_Handle *h, EC_View *view, uint32_t capacity) {
   view->role = h->role;
   view->local_slot = h->local_slot;
   for (uint32_t i = 0; i < 2; i++)
-    view->players[i] = h->players[i];
+    view->players[i] = presented_player(h, i);
   view->snapshot_sequence = h->snapshot_sequence;
   view->rejected_messages = h->rejected;
   view->dropped_events = h->dropped_events;
@@ -393,7 +481,7 @@ int32_t ec_v1_command(EC_Handle *h, int32_t op, int32_t a, int32_t b) {
     return EC_OK;
   case 10: {
     const EC_Player *p =
-        (b >= 1 && b <= 2) ? &h->players[uint32_t(b) - 1] : nullptr;
+        (b >= 1 && b <= 2) ? &presented_player(h, uint32_t(b) - 1) : nullptr;
     switch (a) {
     case 0:
       return int32_t(h->tick);

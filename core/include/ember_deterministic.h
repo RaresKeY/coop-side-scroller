@@ -4,7 +4,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Additive experimental API; the shipping EC01 protocol is unchanged. */
+/* Additive experimental API; its EDI1/EDC1 formats remain separate from shipping EC02. */
 #define EC_DETERMINISTIC_RULES UINT32_C(1)
 #define EC_DETERMINISTIC_HISTORY UINT32_C(256)
 #define EC_DETERMINISTIC_PACKET UINT32_C(80)

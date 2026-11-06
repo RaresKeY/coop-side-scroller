@@ -210,3 +210,13 @@ Deno.test('Mixed client versions cannot strand a room in an unsupported TLS retr
  check((await legacy.call({action:'sync',id:oldRoom.id,seat:guest,retryTls:true,retryCapable:true}))[0]===409);
  check((await legacy.call({action:'sync',id:oldRoom.id,seat:host,retryCapable:'yes'}))[0]===400);
 });
+
+Deno.test('Prediction protocol 2 signaling works and mixed gameplay protocols reject',async()=>{
+ const f=fixture();const room=(await f.call({action:'create',seat:host,name:'Prediction'}))[1];
+ await f.call({action:'join',id:room.id,seat:guest});
+ const v2=type=>btoa(JSON.stringify({...JSON.parse(atob(signal(type))),protocol:2}));
+ const sync=(seat,code)=>f.call({action:'sync',id:room.id,seat,signal:code});
+ check((await sync(host,v2('offer')))[0]===200);
+ check((await sync(guest,signal('answer')))[0]===409,'mixed protocol accepted');
+ check((await sync(guest,v2('answer')))[0]===200);
+});

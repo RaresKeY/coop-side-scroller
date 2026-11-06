@@ -37,6 +37,7 @@ var enemy_hp := 12
 var enemy_flash := 0.0
 var enemy_x := 720.0
 var sprites: Dictionary = {}
+var local_marker: Polygon2D
 var sheet = preload("res://assets/knight.png")
 var animations: SpriteFrames
 var rtc: WebRTCPeerConnection
@@ -95,6 +96,12 @@ func _ready():
  camera = Camera2D.new()
  camera.position = Vector2(480,270)
  add_child(camera)
+ local_marker = Polygon2D.new()
+ local_marker.polygon = PackedVector2Array([Vector2(-5,-7),Vector2(5,-7),Vector2.ZERO])
+ local_marker.color = Color("f5d76c")
+ local_marker.z_index = 10
+ local_marker.hide()
+ add_child(local_marker)
  build_animations()
  var canvas = CanvasLayer.new()
  add_child(canvas)
@@ -586,6 +593,7 @@ func _process(_dt):
 
 func reset_network():
  snapshot_interpolator.reset()
+ if local_marker != null: local_marker.hide()
  connection_generation += 1
  if OS.has_feature("web"):
   var browser_clipboard = JavaScriptBridge.get_interface("EmberClipboard")
@@ -797,6 +805,8 @@ func _physics_process(dt):
   status.text = "Connection timed out • returned to solo"
  if not ui_open and mode != "client" and Input.is_physical_key_pressed(KEY_R): core.command(11)
  core.step(axis,jump,attack)
+ # Send this tick's output now; artificial delay still honors each due time.
+ flush_packets()
  sync_core_view()
  enemy_flash = maxf(0,enemy_flash-dt)
  var local_id = 2 if mode == "client" else 1
@@ -815,6 +825,7 @@ func _physics_process(dt):
    get_tree().quit()
 
 func update_sprites():
+ var local_id = 2 if mode == "client" else 1
  for id in players:
   if not sprites.has(id):
    var sprite: Node2D
@@ -827,17 +838,23 @@ func update_sprites():
     sprite.hframes = 5
     sprite.scale = Vector2(1.5,1.5)
    if not sprite is AnimatedSprite2D: sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
-   sprite.modulate = Color("ffffff") if id == 1 else Color("8ed9ed")
    add_child(sprite)
    sprites[id] = sprite
   var s = players[id]
   var sprite = sprites[id]
+  sprite.modulate = Color("ffffff") if id == local_id else Color("8ed9ed")
   sprite.flip_h = s.face < 0
   if sprite is AnimatedSprite2D:
    sprite.present(s)
   else:
    sprite.position = Vector2(s.x,s.y-17)
    sprite.frame = 4 if s.animation == 3 else 3 if s.animation == 2 else 1+int(elapsed*10)%2 if s.animation in [1,4] else 0
+
+ local_marker.visible = players.has(local_id)
+ if local_marker.visible:
+  var local_state = players[local_id]
+  var above_feet = 74.0 if sprites[local_id] is AnimatedSprite2D else 48.0
+  local_marker.position = Vector2(local_state.x,local_state.y-above_feet)
 
 func update_sprite_positions():
  if mode != "client": return

@@ -148,7 +148,7 @@ function signalEnvelope(code,role) {
  if(typeof code!=='string'||code.length>65536)return null;
  try {
   const data=JSON.parse(atob(code));
-  if(data.game!=='ember-coop'||data.version!==1||data.protocol!==1||!SEAT.test(data.session)||data.type!==(role==='host'?'offer':'answer'))return null;
+  if(data.game!=='ember-coop'||data.version!==1||![1,2].includes(data.protocol)||!SEAT.test(data.session)||data.type!==(role==='host'?'offer':'answer'))return null;
   if(typeof data.sdp!=='string'||!data.sdp.startsWith('v=0')||data.sdp.length>32768||!Array.isArray(data.ice)||!data.ice.length||data.ice.length>64)return null;
   if(data.ice.some(c=>!Array.isArray(c)||c.length!==3||typeof c[0]!=='string'||c[0].length>256||!Number.isInteger(c[1])||c[1]<0||c[1]>65535||typeof c[2]!=='string'||!c[2].startsWith('candidate:')||c[2].length>4096))return null;
   return data;
@@ -272,7 +272,7 @@ export class PrivateLobbies {
    if(!envelope)return reply(400,'invalid_signal');
    const field=host?'offer':'answer';
    if(room[field] && room[field]!==data.signal)return reply(409,'signal_already_set');
-   if(!host && (!room.offer||signalEnvelope(room.offer,'host').session!==envelope.session))return reply(409,'session_mismatch');
+   if(!host && (!room.offer||(signalEnvelope(room.offer,'host').session!==envelope.session||signalEnvelope(room.offer,'host').protocol!==envelope.protocol)))return reply(409,'session_mismatch');
    room[field]=data.signal;
   }
   room[host?'hostSeen':'guestSeen']=now;
