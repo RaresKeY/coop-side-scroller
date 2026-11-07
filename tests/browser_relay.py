@@ -78,7 +78,8 @@ def run(lobby=False, url=None, invite_stdin=False):
     index=guest.evaluate('testRoomList.findIndex(r=>r.id==='+json.dumps(room_id)+')')
     assert 0<=index<3,'Test room outside visible rows; do not join another room'
     guest.click(160,338+index*36) # First room's Join button.
-    wait_until(lambda:guest.evaluate('testPeers.length'),25)
+    # Guest creates its peer after the host publishes gathering, including a TLS retry.
+    wait_until(lambda:guest.evaluate('testPeers.length'),90)
     wait_until(lambda:all(page.evaluate('testPeers.at(-1).getConfiguration().iceTransportPolicy')=='relay' for page in [host,guest]),30)
     print('LOBBY AUTOMATIC SIGNALING',flush=True)
    else:

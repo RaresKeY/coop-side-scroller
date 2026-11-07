@@ -26,12 +26,12 @@ Fast one-way verifiers fit high-entropy random tokens; human-chosen passwords re
 
 ## Rollout boundary
 
-The local code is prepared; this change does not deploy or migrate the live Worker. Before rolling out the new Worker:
+The hash-only Worker and reviewed page are deployed. The workstation operator stores the original invite in its encrypted Secret Service vault and keeps only hash/expiry metadata in JSON; its historical invitation journals and General x86 test metadata contain verifiers only. The obsolete live plaintext binding was explicitly removed after upload because Cloudflare retains omitted secrets. Live issuer/list validation and digest-replay rejection pass. For future verifier migrations:
 
 1. Retain the original invite only in a password manager/protected secret system; hashing cannot recover it later.
 2. Run `python3 tools/invite_verifier.py` in a terminal. Input is masked and output contains only the verifier. For automation, `--stdin` requires a protected pipe; keys must never appear in argv.
-3. Provision `PLAYTEST_TOKEN_SHA256` as the Worker secret, and remove the legacy plaintext `PLAYTEST_TOKEN` binding. Preserve expiry, provider secrets and limiters. Existing operator deployment code/configuration must use this new binding rather than reintroducing the legacy one.
-4. Retire legacy plaintext operator/test invitation files after secure retention. The project browser tools now read masked input or an explicitly protected stdin pipe and no longer read a plaintext invitation JSON.
+3. Provision `PLAYTEST_TOKEN_SHA256` as the Worker secret, and remove the legacy plaintext `PLAYTEST_TOKEN` binding. Preserve expiry, provider secrets and limiters. The patched operator uses this binding and explicitly deletes a retained legacy binding after successful upload; failed uploads never delete it.
+4. Retire legacy plaintext operator/test invitation files after secure retention. The project browser tools read masked input or an explicitly protected stdin pipe and no longer read a plaintext invitation JSON. Automated hosted checks use vault-to-test pipes without storing the original in General x86.
 5. Verify live acceptance/rejection and then publish the reviewed page separately. No rollout is implied by local tests.
 
 Pure local UI checks use a fixed public fixture and deterministic List responses. They exercise the real Godot HTTP bridge but do not prove production service configuration, live TURN routes, third-party password-manager integration or broader device support.
